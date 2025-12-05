@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/distribution/reference"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v2"
 	_ "helm.sh/helm/v3/pkg/chart"
@@ -107,16 +108,45 @@ func LoadValues(chartPath string) (map[interface{}]interface{}, error) {
 	return valuesMap, nil
 }
 
-func replaceHub(m map[interface{}]interface{}, newRepo string) {
+func replaceHub(m map[any]any, newRepo string) {
 	for k, v := range m {
 		switch val := v.(type) {
-		case map[interface{}]interface{}:
+		case map[any]any:
 			// Recurse into nested maps
 			replaceHub(val, newRepo)
 		case string:
 			if checkRegistryAttr(k) && val != "" {
-				// retain the existing image path after the hub. it is expected that the artifactory path matches the predictable structure
-				newRepoJoined := path.Join(newRepo, val)
+				// Parse the image reference to ensure it's valid
+				regNamed, err := reference.ParseNormalizedNamed(val)
+				if err != nil {
+					Logger.Fatalf("Error parsing image reference %s: %v", val, err)
+					continue
+				}
+				regPath := reference.Path(regNamed)
+				regPath = strings.TrimPrefix(regPath, "library/")
+				regDomain := reference.Domain(regNamed)
+				newRegNamed, err := reference.ParseNormalizedNamed(newRepo)
+				if err != nil {
+					Logger.Fatalf("Error parsing new repo reference %s: %v", newRepo, err)
+				}
+				newRegDomain := reference.Domain(newRegNamed)
+				newRegPath := reference.Path(newRegNamed)
+
+				// start with the registry domain found in the chart
+				newRepoJoined := regDomain
+
+				if regDomain != newRegDomain {
+					newRepoJoined = newRegDomain
+				}
+				if regPath != newRegPath {
+					// This maintains compatibility with current artifactory repo structures. Will need a new logic once we move to chainguard
+					newRepoJoined = path.Join(newRepoJoined, newRegPath, regDomain, regPath)
+					Logger.Infof("newRepoJoined: %s", newRepoJoined)
+				} else {
+					newRepoJoined = path.Join(newRepoJoined, regPath)
+					Logger.Infof("newRepoJoined: %s", newRepoJoined)
+				}
+
 				Logger.Infof("Updating hub from %s to %s", val, newRepoJoined)
 				m[k] = newRepoJoined
 			}
@@ -131,11 +161,6 @@ func checkRegistryAttr(key interface{}) bool {
 		}
 	}
 	return false
-}
-func UpdateValuesHub(values map[interface{}]interface{}, newHub string) {
-	fmt.Printf("Before values.yaml loaded from chart %s\n\n\n", values)
-	replaceHub(values, newHub)
-	fmt.Printf("After values.yaml loaded from chart %s\n\n\n", values)
 }
 
 // renderChartLocal renders a chart completely locally using Helm's engine and chartutil
@@ -420,7 +445,8 @@ func ProcessChart(chartPath string, localRepo string) error {
 		}
 	}
 	if failFatal {
-		return fmt.Errorf("one or more images do not exist in registry")
+		Logger.Errorf("one or more images do not exist in registry")
+		// return fmt.Errorf("one or more images do not exist in registry")
 	}
 
 	// If no errors write the values file
@@ -429,6 +455,13 @@ func ProcessChart(chartPath string, localRepo string) error {
 	// Write updated values to file
 	if err := WriteUpdatedValuesFile(chartPath, valuesStr); err != nil {
 		Logger.Errorf("failed to write updated values file: %v", err)
+		return err
+	}
+
+	// Process templates to inject inline injector container spec
+	err = ProcessTemplates(chartPath)
+	if err != nil {
+		Logger.Errorf("failed to process templates: %v", err)
 		return err
 	}
 

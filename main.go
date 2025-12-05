@@ -9,7 +9,7 @@ import (
 const (
 	CHART_DIR     = "/Users/speriya/istio-1.26.2/manifests/charts/gateway"
 	TEMPLATES_DIR = "templates/"
-	LOCAL_REPO    = "registry.omegaworld.net/ext/"
+	LOCAL_REPO    = "registry.omegaworld.net/ext"
 )
 
 func main() {
