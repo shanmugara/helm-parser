@@ -214,13 +214,13 @@ func ProcessTemplates(chartDir string, values map[any]any, customYaml string, cr
 }
 
 // formatValueReferences formats ValueReference slice for logging
-func formatValueReferences(refs []ValueReference) []string {
-	result := make([]string, len(refs))
-	for i, ref := range refs {
-		result[i] = strings.Join(ref.Path, ".")
-	}
-	return result
-}
+// func formatValueReferences(refs []ValueReference) []string {
+// 	result := make([]string, len(refs))
+// 	for i, ref := range refs {
+// 		result[i] = strings.Join(ref.Path, ".")
+// 	}
+// 	return result
+// }
 
 // getKeysFromMap extracts keys from a map[string]bool
 func getKeysFromMap(m map[string]bool) []string {
@@ -259,6 +259,7 @@ func getK8sResourceKind(s string) string {
 					kindValue = strings.Trim(kindValueRaw, `"'} `)
 				} else {
 					// do we need to parse .Values.kind?
+					// maybe not. deploymeent and ds should be treated identically
 					continue
 				}
 			} else {
@@ -281,18 +282,6 @@ func getK8sResourceKind(s string) string {
 type InjectorBlocks map[string][]string
 
 func loadInjectorBlocks(customYaml string) (InjectorBlocks, error) {
-	// Get the directory of this source file
-	// _, filename, _, ok := runtime.Caller(0)
-	// if !ok {
-	// 	return nil, fmt.Errorf("failed to get current file path")
-	// }
-
-	// Get the directory containing this file
-	// dir := filepath.Dir(filename)
-
-	// // Construct the path to inject-blocks.yaml relative to this file
-	// yamlPath := filepath.Join(dir, customYaml)
-
 	// Read yaml file from disk
 	data, err := os.ReadFile(customYaml)
 	if err != nil {
