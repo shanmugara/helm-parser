@@ -13,6 +13,15 @@ allPods:
                 operator: NotIn
                 values:
                   - monitor
+                  
+systemCriticalNodePods:
+- priorityClassName: system-node-critical
+
+systemCriticalClusterPods:
+- priorityClassName: system-cluster-critical
+
+systemCriticalDefaultPods:
+- priorityClassName: ""
 
 allContainers:
 - envFrom:
@@ -23,6 +32,10 @@ allContainers:
 - envFrom:
   - configMapRef:
       name: common-config
+      optional: false
+- envFrom:
+  - secretRef:
+      name: common-secrets
       optional: false
 - resources:
     limits:

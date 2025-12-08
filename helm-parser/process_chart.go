@@ -341,7 +341,7 @@ func splitDocuments(manifest string) []string {
 	return docs
 }
 
-func ProcessChart(chartPath string, localRepo string, customYaml string, criticalDs bool, controlPlane bool, dryRun bool) error {
+func ProcessChart(chartPath string, localRepo string, customYaml string, criticalDs bool, controlPlane bool, systemCritical string, dryRun bool) error {
 	// Verify if the customYaml file exists
 	if _, err := os.Stat(customYaml); os.IsNotExist(err) {
 		Logger.Errorf("Custom YAML file %s does not exist: %v", customYaml, err)
@@ -407,7 +407,7 @@ func ProcessChart(chartPath string, localRepo string, customYaml string, critica
 	// yaml.Marshal which would lose comments and reorder keys.
 
 	// Process templates to inject inline injector container spec
-	err = ProcessTemplates(chartPath, values, customYaml, criticalDs, controlPlane)
+	err = ProcessTemplates(chartPath, values, customYaml, criticalDs, controlPlane, systemCritical)
 	if err != nil {
 		Logger.Errorf("failed to process templates: %v", err)
 		return err

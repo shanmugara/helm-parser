@@ -10,7 +10,7 @@ import (
 
 var (
 	// All Pod-level configuration keys we care about
-	podConfigKeys = []string{"tolerations", "affinity", "nodeSelector"}
+	podConfigKeys = []string{"tolerations", "affinity", "nodeSelector", "priorityClassName"}
 )
 
 // InjectIntoValuesFile injects blocks into the values.yaml file

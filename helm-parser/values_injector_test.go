@@ -80,7 +80,7 @@ someOtherKey: value
 	}
 
 	// Load blocks
-	blocks, err := loadInjectorBlocks("inject-blocks.yaml")
+	blocks, err := loadInjectorBlocks("inject-blocks.yaml", "")
 	if err != nil {
 		t.Fatalf("Failed to load blocks: %v", err)
 	}

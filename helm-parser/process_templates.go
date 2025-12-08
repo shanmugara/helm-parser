@@ -14,9 +14,9 @@ import (
 // adds inline injector specs to both the pod and container levels. It reads the template file, parses it as text,
 // and locates where the pod spec and container specs are defined, then adds the appropriate inline injector blocks.
 // If templates reference .Values, it injects into values.yaml instead of directly into templates.
-func ProcessTemplates(chartDir string, values map[any]any, customYaml string, criticalDs bool, controlPlane bool) error {
+func ProcessTemplates(chartDir string, values map[any]any, customYaml string, criticalDs bool, controlPlane bool, systemCritical string) error {
 	// Load blocks once for all templates
-	blocks, err := loadInjectorBlocks(customYaml)
+	blocks, err := loadInjectorBlocks(customYaml, systemCritical)
 	if err != nil {
 		return fmt.Errorf("failed to load injector blocks: %v", err)
 	}
@@ -281,7 +281,7 @@ func getK8sResourceKind(s string) string {
 // Each category (allPods, allContainers, etc.) contains a list of YAML block strings
 type InjectorBlocks map[string][]string
 
-func loadInjectorBlocks(customYaml string) (InjectorBlocks, error) {
+func loadInjectorBlocks(customYaml string, systemCritical string) (InjectorBlocks, error) {
 	// Read yaml file from disk
 	data, err := os.ReadFile(customYaml)
 	if err != nil {
@@ -306,6 +306,22 @@ func loadInjectorBlocks(customYaml string) (InjectorBlocks, error) {
 				return nil, fmt.Errorf("failed to marshal block in category %s: %v", category, err)
 			}
 			blocks[category] = append(blocks[category], string(blockYAML))
+		}
+	}
+	//DEBUG
+	fmt.Printf("Loaded injector blocks: %+v\n", blocks)
+	switch systemCritical {
+	case "node":
+		if critBlocks, ok := blocks["systemCriticalNodePods"]; ok {
+			blocks["allPods"] = append(blocks["allPods"], critBlocks...)
+		}
+	case "system":
+		if critBlocks, ok := blocks["systemCriticalClusterPods"]; ok {
+			blocks["allPods"] = append(blocks["allPods"], critBlocks...)
+		}
+	default:
+		if critBlocks, ok := blocks["systemCriticalDefaultPods"]; ok {
+			blocks["allPods"] = append(blocks["allPods"], critBlocks...)
 		}
 	}
 

@@ -7,8 +7,8 @@ import (
 )
 
 // injectInlineContainerSpec injects container-level blocks into Kubernetes resource templates
-func injectInlineContainerSpec(content string, customYaml string) (string, error) {
-	blocks, err := loadInjectorBlocks(customYaml)
+func injectInlineContainerSpec(content string, customYaml string, systemCritical string) (string, error) {
+	blocks, err := loadInjectorBlocks(customYaml, systemCritical)
 	if err != nil {
 		return "", err
 	}

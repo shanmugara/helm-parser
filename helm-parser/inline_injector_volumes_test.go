@@ -22,7 +22,7 @@ spec:
           configMap:
             name: my-config`
 
-	result, err := injectInlineContainerSpec(input, "inject-blocks.yaml")
+	result, err := injectInlineContainerSpec(input, "inject-blocks.yaml", "")
 	if err != nil {
 		t.Fatalf("injectInlineContainerSpec failed: %v", err)
 	}
@@ -91,7 +91,7 @@ spec:
           configMap:
             name: app-config`
 
-	result, err := injectInlineContainerSpec(input, "inject-blocks.yaml")
+	result, err := injectInlineContainerSpec(input, "inject-blocks.yaml", "")
 	if err != nil {
 		t.Fatalf("injectInlineContainerSpec failed: %v", err)
 	}
