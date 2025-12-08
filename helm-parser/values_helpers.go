@@ -125,11 +125,11 @@ func injectBlockLines(blocks []string, indent int, key string) []string {
 
 		// Get the base indentation from the first content line
 		firstContentLine := blockLines[1]
-		baseBlockIndent := getIndentation(firstContentLine)
+		baseBlockIndent := GetIndentation(firstContentLine)
 
 		for idx := 1; idx < len(blockLines); idx++ {
 			blockLine := blockLines[idx]
-			lineIndent := getIndentation(blockLine)
+			lineIndent := GetIndentation(blockLine)
 			trimmedBlock := strings.TrimSpace(blockLine)
 
 			// Calculate relative indentation from base

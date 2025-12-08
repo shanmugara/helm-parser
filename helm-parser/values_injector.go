@@ -115,27 +115,22 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 	actuallyInjected := false
 
 	// Build current path as we traverse the file
-	type PathLevel struct {
-		indent int
-		key    string
-	}
-	var pathStack []PathLevel
+	pathStack := NewPathStack()
 
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]
-		trimmed := strings.TrimSpace(line)
-		actualIndent := getIndentation(line)
+		yl := ParseLine(line)
+		actualIndent := yl.Indent
 
 		// Skip empty lines and comments - add to result and continue
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		if yl.IsEmpty || yl.IsComment {
 			result = append(result, line)
 			continue
 		}
 
 		// Check if this is the wrapper line itself - preserve it and skip processing
-		if indentOffset > 0 && actualIndent == 0 && strings.Contains(trimmed, ":") {
-			key := strings.TrimSpace(strings.Split(trimmed, ":")[0])
-			if slices.Contains(KnownWrapperKeys, key) {
+		if indentOffset > 0 && actualIndent == 0 && yl.HasColon {
+			if slices.Contains(KnownWrapperKeys, yl.Key) {
 				result = append(result, line)
 				continue
 			}
@@ -148,34 +143,25 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 		}
 
 		// Update path stack based on virtual indentation
-		// Pop entries from stack if we've outdented
-		for len(pathStack) > 0 && pathStack[len(pathStack)-1].indent >= indent {
-			pathStack = pathStack[:len(pathStack)-1]
-		}
+		pathStack.PopToIndent(indent)
 
 		// Extract key from line if it's a key:value line
-		if strings.Contains(trimmed, ":") {
-			key := strings.TrimSpace(strings.Split(trimmed, ":")[0])
-
+		if yl.HasColon {
 			// Add to path stack
-			pathStack = append(pathStack, PathLevel{indent: indent, key: key})
+			pathStack.Push(indent, yl.Key)
 
 			// Build current path from stack
-			currentPath := make([]string, len(pathStack))
-			for j, level := range pathStack {
-				currentPath[j] = level.key
-			}
+			currentPath := pathStack.CurrentPath()
 
 			// Check if we've reached the target path
 			if pathsMatch(currentPath, ref.Path) {
 				// Found it! Now inject
-				value := strings.TrimSpace(strings.TrimPrefix(trimmed, key+":"))
-				isEmpty := value == "" || value == "[]" || value == "{}"
+				isEmpty := yl.Value == "" || yl.Value == "[]" || yl.Value == "{}"
 
 				if isEmpty {
 					// Empty inline value - but check if there's content on subsequent lines
 					// For complex nested structures (not list-based), check for existing content
-					if key == "affinity" || key == "tolerations" || isComplexNestedBlock(key, blocks) {
+					if yl.Key == "affinity" || yl.Key == "tolerations" || isComplexNestedBlock(yl.Key, blocks) {
 						j := i + 1
 						hasExistingContent := false
 						for j < len(lines) {
@@ -200,7 +186,7 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 						if hasExistingContent {
 							// Already has content - behavior depends on block type
 
-							if key == "tolerations" {
+							if yl.Key == "tolerations" {
 								// For tolerations, collect existing and only add new ones (merge behavior)
 								result = append(result, line)
 								var existingContent []string
@@ -226,7 +212,7 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 								}
 
 								// Check if blocks to inject already exist
-								injected := injectBlockLines(blocks, actualIndent+2, key)
+								injected := injectBlockLines(blocks, actualIndent+2, yl.Key)
 								for _, injLine := range injected {
 									injTrimmed := strings.TrimSpace(injLine)
 									if !containsLine(existingContent, injTrimmed) {
@@ -237,7 +223,7 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 								}
 								i = j - 1
 								continue
-							} else if key == "affinity" || isComplexNestedBlock(key, blocks) {
+							} else if yl.Key == "affinity" || isComplexNestedBlock(yl.Key, blocks) {
 								// For complex nested structures (affinity, resources, etc.), replace existing content
 								// Skip the existing content
 								j = i + 1
@@ -259,8 +245,8 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 								}
 
 								// Now inject our new content
-								result = append(result, strings.Repeat(" ", actualIndent)+key+":")
-								injected := injectBlockLines(blocks, actualIndent+2, key)
+								result = append(result, strings.Repeat(" ", actualIndent)+yl.Key+":")
+								injected := injectBlockLines(blocks, actualIndent+2, yl.Key)
 								result = append(result, injected...)
 								modified = true
 								actuallyInjected = true
@@ -273,14 +259,14 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 
 					// Empty value and no existing content - inject our blocks
 					// Use actualIndent for writing back to preserve file structure
-					result = append(result, strings.Repeat(" ", actualIndent)+key+":")
-					injected := injectBlockLines(blocks, actualIndent+2, key)
+					result = append(result, strings.Repeat(" ", actualIndent)+yl.Key+":")
+					injected := injectBlockLines(blocks, actualIndent+2, yl.Key)
 					result = append(result, injected...)
 					modified = true
 					actuallyInjected = true
 
 					// Skip original value line if it was inline []  or {}
-					if value == "[]" || value == "{}" {
+					if yl.Value == "[]" || yl.Value == "{}" {
 						continue
 					}
 				} else {
@@ -288,7 +274,7 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 					result = append(result, line)
 
 					// For tolerations, check if blocks already exist before appending
-					if key == "tolerations" {
+					if yl.Key == "tolerations" {
 						// Collect existing tolerations content
 						var existingContent []string
 						j := i + 1
@@ -314,7 +300,7 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 						}
 
 						// Check if blocks to inject already exist
-						injected := injectBlockLines(blocks, actualIndent+2, key)
+						injected := injectBlockLines(blocks, actualIndent+2, yl.Key)
 						for _, injLine := range injected {
 							injTrimmed := strings.TrimSpace(injLine)
 							if !containsLine(existingContent, injTrimmed) {
@@ -325,7 +311,7 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 						}
 						i = j - 1
 						continue
-					} else if key == "affinity" || isComplexNestedBlock(key, blocks) {
+					} else if yl.Key == "affinity" || isComplexNestedBlock(yl.Key, blocks) {
 						// For complex nested structures, if there's already content, skip injection entirely
 						// These structures are complex - don't try to merge
 						j := i + 1
@@ -352,14 +338,14 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 
 						// Only inject if there's no existing content
 						if !hasExistingContent {
-							injected := injectBlockLines(blocks, actualIndent+2, key)
+							injected := injectBlockLines(blocks, actualIndent+2, yl.Key)
 							result = append(result, injected...)
 							modified = true
 							actuallyInjected = true
 						}
 						i = j - 1
 						continue
-					} else if key == "tolerations" || isListBasedBlock(key, blocks) {
+					} else if yl.Key == "tolerations" || isListBasedBlock(yl.Key, blocks) {
 						// For list-based blocks (tolerations, envFrom, env), append new items if not already present
 						var existingContent []string
 						j := i + 1
@@ -384,7 +370,7 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 						}
 
 						// Check if blocks to inject already exist
-						injected := injectBlockLines(blocks, actualIndent+2, key)
+						injected := injectBlockLines(blocks, actualIndent+2, yl.Key)
 						for _, injLine := range injected {
 							injTrimmed := strings.TrimSpace(injLine)
 							if !containsLine(existingContent, injTrimmed) {

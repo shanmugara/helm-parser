@@ -172,17 +172,9 @@ func isUnderContainersSection(lines []string, index int) bool {
 	return false
 }
 
-// getIndentation returns the number of spaces at the start of a line
+// getIndentation is a wrapper for GetIndentation for backwards compatibility
 func getIndentation(line string) int {
-	count := 0
-	for _, ch := range line {
-		if ch == ' ' {
-			count++
-		} else {
-			break
-		}
-	}
-	return count
+	return GetIndentation(line)
 }
 
 // findMissingBlocks checks which blocks from the provided list are not already present in the container

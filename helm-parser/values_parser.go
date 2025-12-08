@@ -88,7 +88,7 @@ func detectWrapperPattern(content string) int {
 
 		// Check if first non-comment key is a wrapper pattern
 		if strings.Contains(trimmed, ":") {
-			indent := getIndentation(line)
+			indent := GetIndentation(line)
 			if indent == 0 {
 				key := strings.TrimSpace(strings.Split(trimmed, ":")[0])
 				// Check against known wrapper patterns
