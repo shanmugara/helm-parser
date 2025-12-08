@@ -1,0 +1,52 @@
+---
+allPods:
+- tolerations:
+  - key: addons.kaas.bloomberg.com/unavailable
+    operator: "Exists"
+    effect: NoSchedule
+- affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: kubernetes.io/role
+                operator: NotIn
+                values:
+                  - monitor
+
+allContainers:
+- envFrom:
+  - configMapRef:
+      # Allow KUBERNETES_SERVICE_HOST and KUBERNETES_SERVICE_PORT to be overridden
+      name: kubernetes-services-endpoint
+      optional: true
+- envFrom:
+  - configMapRef:
+      name: common-config
+      optional: false
+- resources:
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+
+criticalDsPods:
+- tolerations:
+  - operator: "Exists"
+    effect: NoSchedule
+
+controlPlanePods:
+- tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: "Exists"
+    effect: NoSchedule
+- affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: Exists

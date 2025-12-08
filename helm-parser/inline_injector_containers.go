@@ -1,14 +1,15 @@
 package helm_parser
 
 import (
-"strings"
+	"fmt"
+	"strings"
 
-"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v2"
 )
 
 // injectInlineContainerSpec injects container-level blocks into Kubernetes resource templates
-func injectInlineContainerSpec(content string) (string, error) {
-	blocks, err := loadInjectorBlocks()
+func injectInlineContainerSpec(content string, customYaml string) (string, error) {
+	blocks, err := loadInjectorBlocks(customYaml)
 	if err != nil {
 		return "", err
 	}
@@ -37,6 +38,8 @@ func injectInlineContainerSpecWithBlocks(content string, blocks InjectorBlocks) 
 			// Check which blocks from allContainers are missing
 			containerBlocks := blocks["allContainers"]
 			missingBlocks := findMissingBlocks(lines, i, indent, containerBlocks)
+			//DEBUG
+			//fmt.Printf("Container '%s' missing blocks: %v\n", strings.TrimSpace(trimmed[7:]), missingBlocks)
 
 			if len(missingBlocks) > 0 {
 				// Check if we have envFrom blocks to inject and if envFrom already exists
@@ -188,9 +191,15 @@ func getIndentation(line string) int {
 // findMissingBlocks checks which blocks from the provided list are not already present in the container
 func findMissingBlocks(lines []string, containerNameIndex, containerIndent int, blockStrings []string) []string {
 	var missing []string
+	//DEBUG
+	//fmt.Printf("blockStrings to check: %v\n", blockStrings)
 
 	for _, block := range blockStrings {
+		//DEBUG
+		//fmt.Printf("Checking for block:\n%s\n", block)
 		if !containerHasBlock(lines, containerNameIndex, containerIndent, block) {
+			//DEBUG
+			fmt.Printf("Block is missing, will inject.\n%s\n", block)
 			missing = append(missing, block)
 		}
 	}
@@ -467,14 +476,4 @@ func injectMissingBlocks(missingBlocks []string, indent int) []string {
 	}
 
 	return result
-}
-
-// generateEnvFromBlock generates the envFrom block with proper indentation
-func generateEnvFromBlock(indent int) []string {
-	spaces := strings.Repeat(" ", indent)
-	return []string{
-		spaces + "envFrom:",
-		spaces + "- configMapRef:",
-		spaces + "    name: inline-injector-config",
-	}
 }
