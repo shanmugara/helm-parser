@@ -216,7 +216,14 @@ func CheckImagesExist(ctx context.Context, images []string, username, password s
 				// Distinguish common cases by inspecting error text (remote returns wrapped errors).
 				Logger.Debugf("remote.Get failed for %s: %v", img, err)
 				mu.Lock()
-				results[img] = false
+				if img == "auto" {
+					Logger.Warnf("special case: 'auto' image reference encountered, treating as existing without validation")
+					// Special case: "auto" is not a valid image, treat as non-existent without logging
+					results[img] = true
+
+				} else {
+					results[img] = false
+				}
 				mu.Unlock()
 				return
 			}

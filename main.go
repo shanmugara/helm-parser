@@ -19,15 +19,18 @@ func main() {
 	var customYaml string
 	var criticalDs bool
 	var controlPlane bool
+	var dryRun bool
+
 	flag.StringVar(&localRepo, "local-repo", LOCAL_REPO, "Local repository prefix for images")
 	flag.StringVar(&chartDir, "chart-dir", CHART_DIR, "Path to the Helm chart directory")
 	flag.StringVar(&templatesDir, "templates-dir", TEMPLATES_DIR, "Path to the templates directory within the chart")
 	flag.StringVar(&customYaml, "custom-yaml", "inject-blocks.yaml", "Path to a custom YAML file")
 	flag.BoolVar(&criticalDs, "critical-ds", false, "Enable critical DaemonSet processing")
 	flag.BoolVar(&controlPlane, "control-plane", false, "Enable control plane processing")
+	flag.BoolVar(&dryRun, "dry-run", false, "Enable dry run mode")
 	flag.Parse()
 
-	if err := helm_parser.ProcessChart(chartDir, localRepo, customYaml, criticalDs, controlPlane); err != nil {
+	if err := helm_parser.ProcessChart(chartDir, localRepo, customYaml, criticalDs, controlPlane, dryRun); err != nil {
 		log.Fatalf("ProcessChart failed: %v", err)
 	}
 }

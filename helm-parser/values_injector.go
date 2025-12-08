@@ -41,14 +41,14 @@ func InjectIntoValuesFile(chartDir string, blocks InjectorBlocks, referencedPath
 
 	// Detect if this uses a wrapper pattern (e.g., Istio's _internal_defaults_do_not_set)
 	indentOffset := detectWrapperPattern(string(content))
-	if indentOffset > 0 {
-		Logger.Infof("Detected wrapper pattern with indent offset: %d", indentOffset)
-	}
+	// if indentOffset > 0 {
+	// 	Logger.Infof("Detected wrapper pattern with indent offset: %d", indentOffset)
+	// }
 
 	modifiedContent := string(content)
 	modified := false
 	//DEBUG
-	Logger.Info("referencedPaths:", referencedPaths)
+	//Logger.Info("referencedPaths:", referencedPaths)
 
 	// Process each referenced path
 	for _, ref := range referencedPaths {
@@ -72,7 +72,7 @@ func InjectIntoValuesFile(chartDir string, blocks InjectorBlocks, referencedPath
 			case "affinity":
 				injectedBlocks = getPodBlocksByKey(blocks["allPods"], "affinity")
 				if criticalDs {
-					critDsBlocks := getPodBlocksByKey(blocks["criticalPods"], "affinity")
+					critDsBlocks := getPodBlocksByKey(blocks["criticalDsPods"], "affinity")
 					injectedBlocks = append(injectedBlocks, critDsBlocks...)
 				}
 				if controlPlane {
@@ -160,8 +160,6 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 		// Pop entries from stack if we've outdented
 		for len(pathStack) > 0 && pathStack[len(pathStack)-1].indent >= indent {
 			pathStack = pathStack[:len(pathStack)-1]
-			//DEBUG
-			//Logger.Info("pathStack:", pathStack)
 		}
 
 		// Extract key from line if it's a key:value line

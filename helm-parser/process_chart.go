@@ -59,6 +59,7 @@ func LoadValues(chartPath string) (map[interface{}]interface{}, error) {
 	return valuesMap, nil
 }
 
+// DEPRECATED: Use UpdateRegistryInValuesFile for text-based updates that preserve comments and order
 func replaceHub(m map[any]any, newRepo string) {
 	for k, v := range m {
 		switch val := v.(type) {
@@ -340,7 +341,7 @@ func splitDocuments(manifest string) []string {
 	return docs
 }
 
-func ProcessChart(chartPath string, localRepo string, customYaml string, criticalDs bool, controlPlane bool) error {
+func ProcessChart(chartPath string, localRepo string, customYaml string, criticalDs bool, controlPlane bool, dryRun bool) error {
 	// Verify if the customYaml file exists
 	if _, err := os.Stat(customYaml); os.IsNotExist(err) {
 		Logger.Errorf("Custom YAML file %s does not exist: %v", customYaml, err)
@@ -383,9 +384,6 @@ func ProcessChart(chartPath string, localRepo string, customYaml string, critica
 	// Log missing images
 	failFatal := false
 
-	//DEBUG
-	//Logger.Infof("images before check: %s", images)
-
 	for _, img := range images {
 		if exists, ok := imageExistMap[img]; ok {
 			if !exists {
@@ -398,8 +396,10 @@ func ProcessChart(chartPath string, localRepo string, customYaml string, critica
 		}
 	}
 	if failFatal {
+		if !dryRun {
+			return fmt.Errorf("one or more images do not exist in registry")
+		}
 		Logger.Errorf("one or more images do not exist in registry")
-		// return fmt.Errorf("one or more images do not exist in registry")
 	}
 
 	// Note: Registry updates are already done by UpdateRegistryInValuesFile() using text-based manipulation

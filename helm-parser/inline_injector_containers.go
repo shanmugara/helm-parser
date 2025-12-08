@@ -1,7 +1,6 @@
 package helm_parser
 
 import (
-	"fmt"
 	"strings"
 
 	"gopkg.in/yaml.v2"
@@ -38,8 +37,6 @@ func injectInlineContainerSpecWithBlocks(content string, blocks InjectorBlocks) 
 			// Check which blocks from allContainers are missing
 			containerBlocks := blocks["allContainers"]
 			missingBlocks := findMissingBlocks(lines, i, indent, containerBlocks)
-			//DEBUG
-			//fmt.Printf("Container '%s' missing blocks: %v\n", strings.TrimSpace(trimmed[7:]), missingBlocks)
 
 			if len(missingBlocks) > 0 {
 				// Check if we have envFrom blocks to inject and if envFrom already exists
@@ -191,15 +188,9 @@ func getIndentation(line string) int {
 // findMissingBlocks checks which blocks from the provided list are not already present in the container
 func findMissingBlocks(lines []string, containerNameIndex, containerIndent int, blockStrings []string) []string {
 	var missing []string
-	//DEBUG
-	//fmt.Printf("blockStrings to check: %v\n", blockStrings)
 
 	for _, block := range blockStrings {
-		//DEBUG
-		//fmt.Printf("Checking for block:\n%s\n", block)
 		if !containerHasBlock(lines, containerNameIndex, containerIndent, block) {
-			//DEBUG
-			fmt.Printf("Block is missing, will inject.\n%s\n", block)
 			missing = append(missing, block)
 		}
 	}

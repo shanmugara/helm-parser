@@ -38,8 +38,6 @@ func ProcessTemplates(chartDir string, values map[any]any, customYaml string, cr
 		if info.IsDir() {
 			return nil
 		}
-		//DEBUG
-		//Logger.Info("current file:", path)
 		content, err := os.ReadFile(path)
 		if err != nil {
 			return nil // Skip files we can't read
@@ -63,7 +61,7 @@ func ProcessTemplates(chartDir string, values map[any]any, customYaml string, cr
 	// if templates reference .Values, and if we find our custom injector block keys in values.yaml,
 	// inject custom values into values.yaml instead of directly into templates
 	if len(allValueReferences) > 0 {
-		Logger.Infof("Detected .Values references: %v", formatValueReferences(allValueReferences))
+		//Logger.Infof("Detected .Values references: %v", formatValueReferences(allValueReferences))
 		if err := InjectIntoValuesFile(chartDir, blocks, allValueReferences, criticalDs, controlPlane); err != nil {
 			Logger.Warnf("Failed to inject into values.yaml: %v", err)
 		}
@@ -92,9 +90,18 @@ func ProcessTemplates(chartDir string, values map[any]any, customYaml string, cr
 			modified := false
 
 			// Inject pod-level blocks - only inject keys that don't use .Values
-			if len(blocks["allPods"]) > 0 {
+			if len(blocks["allPods"]) > 0 || (criticalDs && len(blocks["criticalDsPods"]) > 0) || (controlPlane && len(blocks["controlPlanePods"]) > 0) {
+				// Combine pod blocks based on flags
+				combinedPodBlocks := blocks["allPods"]
+				if criticalDs {
+					combinedPodBlocks = append(combinedPodBlocks, blocks["criticalDsPods"]...)
+				}
+				if controlPlane {
+					combinedPodBlocks = append(combinedPodBlocks, blocks["controlPlanePods"]...)
+				}
+
 				// Extract pod-level keys dynamically from blocks
-				podKeys := extractContainerBlockKeys(blocks["allPods"]) // reuse same function
+				podKeys := extractContainerBlockKeys(combinedPodBlocks) // reuse same function
 
 				// Build a map of which keys use .Values
 				keysUsingValues := make(map[string]bool)
@@ -109,7 +116,7 @@ func ProcessTemplates(chartDir string, values map[any]any, customYaml string, cr
 				// Filter blocks to only include keys that don't use .Values
 				blocksToInject := []string{}
 				keysToInject := []string{}
-				for _, block := range blocks["allPods"] {
+				for _, block := range combinedPodBlocks {
 					var blockData map[string]interface{}
 					if err := yaml.Unmarshal([]byte(block), &blockData); err != nil {
 						continue
