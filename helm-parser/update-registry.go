@@ -3,8 +3,6 @@ package helm_parser
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -12,42 +10,43 @@ import (
 	regauthn "github.com/google/go-containerregistry/pkg/authn"
 	regname "github.com/google/go-containerregistry/pkg/name"
 	regremote "github.com/google/go-containerregistry/pkg/v1/remote"
+
 	"gopkg.in/yaml.v2"
-	"helm.sh/helm/v3/pkg/release"
 )
 
-func UpdateRegistryName(chartPath string, values map[interface{}]interface{}, localRepo string) (*release.Release, error) {
+func UpdateRegistryName(chartPath string, values map[interface{}]interface{}, localRepo string) error {
 	// Update registry paths in values.yaml using text-based manipulation
 	// This preserves comments, order, and formatting
 	if err := UpdateRegistryInValuesFile(chartPath, localRepo); err != nil {
 		Logger.Errorf("failed to update registry in values file: %v", err)
-		return nil, err
+		return err
 	}
+	return nil
 
-	// Read the updated values back for rendering
-	valuesPath := filepath.Join(chartPath, "values.yaml")
-	updatedValues, err := os.ReadFile(valuesPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read updated values: %v", err)
-	}
+	// // Read the updated values back for rendering
+	// valuesPath := filepath.Join(chartPath, "values.yaml")
+	// updatedValues, err := os.ReadFile(valuesPath)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("failed to read updated values: %v", err)
+	// }
 
-	// Parse updated values - unmarshal into map[interface{}]interface{} first
-	var valuesMapI map[interface{}]interface{}
-	if err := yaml.Unmarshal(updatedValues, &valuesMapI); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal updated values: %v", err)
-	}
+	// // Parse updated values - unmarshal into map[interface{}]interface{} first
+	// var valuesMapI map[interface{}]interface{}
+	// if err := yaml.Unmarshal(updatedValues, &valuesMapI); err != nil {
+	// 	return nil, fmt.Errorf("failed to unmarshal updated values: %v", err)
+	// }
 
-	// Convert to map[string]interface{} recursively to avoid JSON schema validation errors
-	valuesMap := convertMapI2MapS(valuesMapI).(map[string]interface{})
+	// // Convert to map[string]interface{} recursively to avoid JSON schema validation errors
+	// valuesMap := convertMapI2MapS(valuesMapI).(map[string]interface{})
 
-	// Now render the chart with updated values
-	rel, err := renderChartLocal(chartPath, valuesMap)
-	if err != nil {
-		Logger.Errorf("error rendering chart: %s", err)
-		return nil, err
-	}
+	// // Now render the chart with updated values
+	// rel, err := renderChartLocal(chartPath, valuesMap)
+	// if err != nil {
+	// 	Logger.Errorf("error rendering chart: %s", err)
+	// 	return nil, err
+	// }
 
-	return rel, nil
+	// return rel, nil
 }
 
 func ExtractImagesFromManifest(manifest string) ([]string, error) {

@@ -341,7 +341,7 @@ func splitDocuments(manifest string) []string {
 	return docs
 }
 
-func ProcessChart(chartPath string, localRepo string, customYaml string, criticalDs bool, controlPlane bool, systemCritical string, dryRun bool) error {
+func ProcessChart(chartPath string, localRepo string, customYaml string, criticalDs bool, controlPlane bool, systemCritical string, dryRun bool, verbose bool) error {
 	// Verify if the customYaml file exists
 	if _, err := os.Stat(customYaml); os.IsNotExist(err) {
 		Logger.Errorf("Custom YAML file %s does not exist: %v", customYaml, err)
@@ -361,9 +361,15 @@ func ProcessChart(chartPath string, localRepo string, customYaml string, critica
 		return err
 	}
 	// First update the registry names in values to localRepo and render the chart
-	rel, err := UpdateRegistryName(chartPath, values, localRepo)
+	err = UpdateRegistryName(chartPath, values, localRepo)
 	if err != nil {
-		Logger.Fatalf("failed to render chart with values: %v", err)
+		Logger.Fatalf("failed to update registry name: %v", err)
+		return err
+	}
+	// Render the chart locally with updated values
+	rel, err := renderChartFromValues(chartPath)
+	if err != nil {
+		Logger.Errorf("failed to render chart from updated values: %v", err)
 		return err
 	}
 	// Parse rendered manifest and extract images from pod specs
@@ -411,6 +417,18 @@ func ProcessChart(chartPath string, localRepo string, customYaml string, critica
 	if err != nil {
 		Logger.Errorf("failed to process templates: %v", err)
 		return err
+	}
+
+	// Validate by rendering the chart again after injection
+	// Render the chart locally with updated values
+	relUpdated, err := renderChartFromValues(chartPath)
+	if err != nil {
+		Logger.Errorf("failed to render chart from updated values: %v", err)
+		return err
+	}
+
+	if verbose {
+		Logger.Infof("Rendered manifest after injection:\n%s", relUpdated.Manifest)
 	}
 
 	return nil

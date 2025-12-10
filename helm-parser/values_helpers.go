@@ -1,9 +1,13 @@
 package helm_parser
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v2"
+	"helm.sh/helm/v3/pkg/release"
 )
 
 // pathsMatch checks if the current path matches the target path
@@ -118,6 +122,15 @@ func injectBlockLines(blocks []string, indent int, key string) []string {
 
 	for _, block := range blocks {
 		blockLines := strings.Split(strings.TrimSpace(block), "\n")
+
+		// Handle single-line scalar values (e.g., "priorityClassName: system-node-critical")
+		if len(blockLines) == 1 {
+			// For single-line blocks, just add the line with proper indentation
+			trimmedBlock := strings.TrimSpace(blockLines[0])
+			result = append(result, strings.Repeat(" ", indent)+trimmedBlock)
+			continue
+		}
+
 		// Skip the key line (e.g., "tolerations:" or "affinity:")
 		if len(blockLines) < 2 {
 			continue
@@ -141,4 +154,51 @@ func injectBlockLines(blocks []string, indent int, key string) []string {
 	}
 
 	return result
+}
+
+// isSingleLineScalar checks if all blocks for a key are single-line scalar values
+func isSingleLineScalar(blocks []string, key string) bool {
+	if len(blocks) == 0 {
+		return false
+	}
+
+	for _, block := range blocks {
+		blockLines := strings.Split(strings.TrimSpace(block), "\n")
+		// Must be exactly 1 line and contain the key
+		if len(blockLines) != 1 {
+			return false
+		}
+		// Check if it's a simple key:value format (not nested)
+		trimmed := strings.TrimSpace(blockLines[0])
+		if !strings.HasPrefix(trimmed, key+":") {
+			return false
+		}
+	}
+	return true
+}
+
+func renderChartFromValues(chartPath string) (*release.Release, error) {
+	// Read the updated values back for rendering
+	valuesPath := filepath.Join(chartPath, "values.yaml")
+	updatedValues, err := os.ReadFile(valuesPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read updated values: %v", err)
+	}
+
+	// Parse updated values - unmarshal into map[interface{}]interface{} first
+	var valuesMapI map[interface{}]interface{}
+	if err := yaml.Unmarshal(updatedValues, &valuesMapI); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal updated values: %v", err)
+	}
+
+	// Convert to map[string]interface{} recursively to avoid JSON schema validation errors
+	valuesMap := convertMapI2MapS(valuesMapI).(map[string]interface{})
+
+	// Now render the chart with updated values
+	rel, err := renderChartLocal(chartPath, valuesMap)
+	if err != nil {
+		Logger.Errorf("error rendering chart: %s", err)
+		return nil, err
+	}
+	return rel, nil
 }

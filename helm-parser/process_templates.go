@@ -61,8 +61,9 @@ func ProcessTemplates(chartDir string, values map[any]any, customYaml string, cr
 	// if templates reference .Values, and if we find our custom injector block keys in values.yaml,
 	// inject custom values into values.yaml instead of directly into templates
 	if len(allValueReferences) > 0 {
-		//Logger.Infof("Detected .Values references: %v", formatValueReferences(allValueReferences))
-		if err := InjectIntoValuesFile(chartDir, blocks, allValueReferences, criticalDs, controlPlane); err != nil {
+		//DEBUG
+		//Logger.Infof("Detected .Values references: %v", allValueReferences)
+		if err := InjectIntoValuesFile(chartDir, blocks, allValueReferences, criticalDs, controlPlane, systemCritical); err != nil {
 			Logger.Warnf("Failed to inject into values.yaml: %v", err)
 		}
 	}
@@ -83,6 +84,7 @@ func ProcessTemplates(chartDir string, values map[any]any, customYaml string, cr
 
 		// Check if the file contains a Kubernetes resource kind that needs injection
 		if kind := getK8sResourceKind(string(content)); kind != "" {
+			Logger.Infof("Processing template file: %s (kind: %s)", path, kind)
 			// Detect which values this template references
 			valueRefs := DetectValueReferences(string(content))
 
@@ -266,7 +268,7 @@ func getK8sResourceKind(s string) string {
 				kindValue = kindValueRaw
 			}
 			// Check for exact match
-			Logger.Infof("Found resource kind: %s", kindValue)
+			//Logger.Infof("Found resource kind: %s", kindValue)
 			for _, kind := range resourceKinds {
 				if kindValue == kind {
 					return kind
@@ -292,7 +294,7 @@ func loadInjectorBlocks(customYaml string, systemCritical string) (InjectorBlock
 	// The structure is: top-level keys -> list of YAML blocks
 	var rawBlocks map[string][]interface{}
 	if err := yaml.Unmarshal(data, &rawBlocks); err != nil {
-		return nil, fmt.Errorf("failed to parse inject-blocks.yaml: %v", err)
+		return nil, fmt.Errorf("failed to parse %s: %v", customYaml, err)
 	}
 
 	// Convert each block to a string representation
@@ -308,14 +310,13 @@ func loadInjectorBlocks(customYaml string, systemCritical string) (InjectorBlock
 			blocks[category] = append(blocks[category], string(blockYAML))
 		}
 	}
-	//DEBUG
-	fmt.Printf("Loaded injector blocks: %+v\n", blocks)
+
 	switch systemCritical {
 	case "node":
 		if critBlocks, ok := blocks["systemCriticalNodePods"]; ok {
 			blocks["allPods"] = append(blocks["allPods"], critBlocks...)
 		}
-	case "system":
+	case "cluster":
 		if critBlocks, ok := blocks["systemCriticalClusterPods"]; ok {
 			blocks["allPods"] = append(blocks["allPods"], critBlocks...)
 		}
@@ -324,6 +325,10 @@ func loadInjectorBlocks(customYaml string, systemCritical string) (InjectorBlock
 			blocks["allPods"] = append(blocks["allPods"], critBlocks...)
 		}
 	}
+	//DEBUG
+	// fmt.Printf("Loaded injector blocks: %+v\n", blocks)
+	// fmt.Println("Press Enter to continue...")
+	// bufio.NewReader(os.Stdin).ReadBytes('\n')
 
 	return blocks, nil
 }

@@ -15,7 +15,7 @@ var (
 
 // InjectIntoValuesFile injects blocks into the values.yaml file
 // It detects which sections are referenced in templates and injects accordingly
-func InjectIntoValuesFile(chartDir string, blocks InjectorBlocks, referencedPaths []ValueReference, criticalDs bool, controlPlane bool) error {
+func InjectIntoValuesFile(chartDir string, blocks InjectorBlocks, referencedPaths []ValueReference, criticalDs bool, controlPlane bool, systemCritical string) error {
 	//DEBUG
 	//Logger.Info("inside InjectIntoValuesFile")
 	if len(referencedPaths) == 0 {
@@ -49,6 +49,7 @@ func InjectIntoValuesFile(chartDir string, blocks InjectorBlocks, referencedPath
 		// First check if it's a pod-level key
 		if slices.Contains(podConfigKeys, ref.Key) {
 			// Pod-level blocks
+			// We need to add new keys as we go, so handle each key specifically
 			switch ref.Key {
 			case "tolerations":
 				injectedBlocks = getPodBlocksByKey(blocks["allPods"], "tolerations")
@@ -72,6 +73,20 @@ func InjectIntoValuesFile(chartDir string, blocks InjectorBlocks, referencedPath
 				}
 			case "nodeSelector":
 				injectedBlocks = getPodBlocksByKey(blocks["allPods"], "nodeSelector")
+			case "priorityClassName":
+				Logger.Infof("Processing priorityClassName with systemCritical=%s", systemCritical)
+				switch systemCritical {
+				case "node":
+					injectedBlocks = getBlocksByKey(blocks["systemCriticalNodePods"], "priorityClassName")
+					Logger.Infof("node: found %d blocks", len(injectedBlocks))
+				case "cluster":
+					injectedBlocks = getBlocksByKey(blocks["systemCriticalClusterPods"], "priorityClassName")
+					Logger.Infof("cluster: found %d blocks", len(injectedBlocks))
+				default:
+					injectedBlocks = getBlocksByKey(blocks["systemCriticalDefaultPods"], "priorityClassName")
+					Logger.Infof("default: found %d blocks", len(injectedBlocks))
+					// Non-system-critical pods get no priorityClassName injection
+				}
 			}
 		} else {
 			// Container-level blocks - dynamically check all container blocks
@@ -271,6 +286,23 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 					}
 				} else {
 					// Has existing content - check if our content already exists
+
+					// For simple scalar values (like priorityClassName: "value"), replace the entire line
+					if !isComplexNestedBlock(yl.Key, blocks) && !isListBasedBlock(yl.Key, blocks) {
+						Logger.Infof("Found scalar value for key=%s, replacing with injected content", yl.Key)
+						// Simple scalar value - replace with injected content
+						injected := injectBlockLines(blocks, actualIndent, yl.Key)
+						if len(injected) > 0 {
+							result = append(result, injected...)
+							modified = true
+							actuallyInjected = true
+							Logger.Infof("Replaced scalar value for key=%s", yl.Key)
+						} else {
+							result = append(result, line)
+						}
+						continue
+					}
+
 					result = append(result, line)
 
 					// For tolerations, check if blocks already exist before appending
@@ -401,11 +433,24 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 		}
 
 		// Add the new key and its blocks
-		result = append(result, key+":")
-		injected := injectBlockLines(blocks, 2+indentOffset, key)
-		result = append(result, injected...)
+		// If there's a wrapper pattern, indent the key appropriately
+		keyIndent := indentOffset
+
+		// Check if this is a single-line scalar value (like "priorityClassName: value")
+		if isSingleLineScalar(blocks, key) {
+			// For single-line scalars, the block already contains the key, so just add it directly
+			injected := injectBlockLines(blocks, keyIndent, key)
+			result = append(result, injected...)
+		} else {
+			// For multi-line blocks, add the key line first, then the content
+			result = append(result, strings.Repeat(" ", keyIndent)+key+":")
+			injected := injectBlockLines(blocks, 2+indentOffset, key)
+			result = append(result, injected...)
+		}
+
 		modified = true
 		actuallyInjected = true
+		Logger.Infof("Added new root-level key '%s' with indentOffset=%d", key, indentOffset)
 	}
 
 	return strings.Join(result, "\n"), modified, actuallyInjected

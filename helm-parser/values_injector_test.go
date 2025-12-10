@@ -94,7 +94,7 @@ someOtherKey: value
 	}
 
 	// Inject into values
-	if err := InjectIntoValuesFile(tmpDir, blocks, refs, false, false); err != nil {
+	if err := InjectIntoValuesFile(tmpDir, blocks, refs, false, false, ""); err != nil {
 		t.Fatalf("InjectIntoValuesFile failed: %v", err)
 	}
 

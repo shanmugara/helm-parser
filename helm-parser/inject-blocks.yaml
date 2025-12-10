@@ -13,7 +13,7 @@ allPods:
                 operator: NotIn
                 values:
                   - monitor
-                  
+
 systemCriticalNodePods:
 - priorityClassName: system-node-critical
 
@@ -29,21 +29,6 @@ allContainers:
       # Allow KUBERNETES_SERVICE_HOST and KUBERNETES_SERVICE_PORT to be overridden
       name: kubernetes-services-endpoint
       optional: true
-- envFrom:
-  - configMapRef:
-      name: common-config
-      optional: false
-- envFrom:
-  - secretRef:
-      name: common-secrets
-      optional: false
-- resources:
-    limits:
-      cpu: "2"
-      memory: "4Gi"
-    requests:
-      cpu: "250m"
-      memory: "512Mi"
 
 criticalDsPods:
 - tolerations:

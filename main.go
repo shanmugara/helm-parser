@@ -24,6 +24,7 @@ var (
 	controlPlane   bool
 	systemCritical string
 	dryRun         bool
+	verbose        bool
 )
 
 var rootCmd = &cobra.Command{
@@ -32,7 +33,7 @@ var rootCmd = &cobra.Command{
 	Long: `A tool to parse Helm charts, inject custom blocks, and update container registries.
 It can inject pod-level and container-level configurations into Helm templates or values.yaml files.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return helm_parser.ProcessChart(chartDir, localRepo, customYaml, criticalDs, controlPlane, systemCritical, dryRun)
+		return helm_parser.ProcessChart(chartDir, localRepo, customYaml, criticalDs, controlPlane, systemCritical, dryRun, verbose)
 	},
 }
 
@@ -45,11 +46,12 @@ func init() {
 	rootCmd.Flags().BoolVar(&controlPlane, "control-plane", false, "Enable control plane processing (adds controlPlanePods blocks)")
 	rootCmd.Flags().StringVar(&systemCritical, "system-critical", "", "Specify system critical component")
 	rootCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Enable dry run mode (show changes without modifying files)")
+	rootCmd.Flags().BoolVar(&verbose, "verbose", false, "Enable verbose logging")
 
 	// Mark required flags if needed
 	// rootCmd.MarkFlagRequired("chart-dir")
 	rootCmd.RegisterFlagCompletionFunc("system-critical", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return []string{"node", "system", ""}, cobra.ShellCompDirectiveNoFileComp
+		return []string{"node", "cluster", ""}, cobra.ShellCompDirectiveNoFileComp
 	})
 }
 

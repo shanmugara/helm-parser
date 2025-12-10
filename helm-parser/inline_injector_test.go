@@ -71,17 +71,23 @@ func TestProcessTemplates(t *testing.T) {
 		t.Error("Expected resources block to be injected in values.yaml")
 	}
 
-	// Deployment template should NOT be modified (uses .Values references)
+	// Deployment template WILL be modified for keys not using .Values (like envFrom)
 	modifiedDeploymentContent, err := os.ReadFile(deploymentPath)
 	if err != nil {
 		t.Fatalf("Failed to read deployment.yaml: %v", err)
 	}
 
-	if string(modifiedDeploymentContent) != string(originalDeploymentContent) {
-		t.Error("deployment.yaml should not be modified when using .Values references")
+	modifiedDeploymentStr := string(modifiedDeploymentContent)
+
+	// Check that envFrom was injected inline (since cert-manager doesn't use .Values.envFrom)
+	if !strings.Contains(modifiedDeploymentStr, "envFrom:") {
+		t.Error("Expected envFrom to be injected inline in deployment.yaml")
+	}
+	if !strings.Contains(modifiedDeploymentStr, "kubernetes-services-endpoint") {
+		t.Error("Expected kubernetes-services-endpoint configMapRef to be injected inline")
 	}
 
-	t.Log("✓ ProcessTemplates correctly injected into values.yaml and skipped template modification")
+	t.Log("✓ ProcessTemplates correctly injected into values.yaml and inline into templates")
 }
 
 func TestInjectInlineContainerSpec(t *testing.T) {
@@ -218,18 +224,4 @@ spec:
 	}
 
 	t.Log("✓ Idempotent test passed - no duplication")
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

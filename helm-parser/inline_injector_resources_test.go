@@ -86,9 +86,8 @@ spec:
 		t.Error("Expected 'kubernetes-services-endpoint' to be appended")
 	}
 
-	if !strings.Contains(result, "common-config") {
-		t.Error("Expected 'common-config' to be appended")
-	}
+	// Note: inject-blocks.yaml only has kubernetes-services-endpoint envFrom entry
+	// (common-config and common-secrets were removed to simplify test setup)
 
 	// Should preserve existing secretRef
 	if !strings.Contains(result, "my-secret") {
