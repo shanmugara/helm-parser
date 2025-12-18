@@ -32,7 +32,7 @@ func injectInlineContainerSpecWithBlocks(content string, blocks InjectorBlocks) 
 			result = append(result, line)
 
 			// Find the indentation level of the container
-			indent := getIndentation(line)
+			indent := GetIndentation(line)
 
 			// Check which blocks from allContainers are missing
 			containerBlocks := blocks["allContainers"]

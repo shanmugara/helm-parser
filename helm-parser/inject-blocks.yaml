@@ -1,5 +1,6 @@
 ---
 allPods:
+- priorityClassName: system-cluster-critical
 - tolerations:
   - key: addons.kaas.bloomberg.com/unavailable
     operator: "Exists"

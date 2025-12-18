@@ -12,7 +12,7 @@ import (
 const (
 	CHART_DIR     = "/Users/speriya/istio-1.26.2/manifests/charts/gateway"
 	TEMPLATES_DIR = "templates/"
-	LOCAL_REPO    = "registry.omegaworld.net/ext"
+	LOCAL_REPO    = "registry.omegaworld.net/home/ext"
 )
 
 var (
@@ -50,6 +50,7 @@ func init() {
 
 	// Mark required flags if needed
 	// rootCmd.MarkFlagRequired("chart-dir")
+	//deprecated. specify in allPods only
 	rootCmd.RegisterFlagCompletionFunc("system-critical", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return []string{"node", "cluster", ""}, cobra.ShellCompDirectiveNoFileComp
 	})

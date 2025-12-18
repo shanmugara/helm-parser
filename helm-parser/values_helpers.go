@@ -71,10 +71,6 @@ func extractContainerBlockKeys(blocks []string) []string {
 // isComplexNestedBlock checks if a key represents a complex nested structure (like resources)
 // by looking at the blocks to see if the value is a nested map (not a list)
 func isComplexNestedBlock(key string, injectedBlocks []string) bool {
-	// Affinity is always complex
-	if key == "affinity" {
-		return true
-	}
 
 	for _, block := range injectedBlocks {
 		var blockData map[string]interface{}
@@ -131,11 +127,6 @@ func injectBlockLines(blocks []string, indent int, key string) []string {
 			continue
 		}
 
-		// Skip the key line (e.g., "tolerations:" or "affinity:")
-		if len(blockLines) < 2 {
-			continue
-		}
-
 		// Get the base indentation from the first content line
 		firstContentLine := blockLines[1]
 		baseBlockIndent := GetIndentation(firstContentLine)
@@ -152,7 +143,8 @@ func injectBlockLines(blocks []string, indent int, key string) []string {
 			result = append(result, strings.Repeat(" ", indent+relativeIndent)+trimmedBlock)
 		}
 	}
-
+	//DEBUG
+	//Logger.Infof("Injected lines for key=%s:\n%s", key, strings.Join(result, "\n"))
 	return result
 }
 
@@ -191,7 +183,8 @@ func renderChartFromValues(chartPath string) (*release.Release, error) {
 		return nil, fmt.Errorf("failed to unmarshal updated values: %v", err)
 	}
 
-	// Convert to map[string]interface{} recursively to avoid JSON schema validation errors
+	// Convert to map[string]interface{} recursively to avoid JSON schema validation errors.
+	// we assert the type after conversion
 	valuesMap := convertMapI2MapS(valuesMapI).(map[string]interface{})
 
 	// Now render the chart with updated values

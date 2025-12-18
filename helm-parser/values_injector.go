@@ -11,6 +11,8 @@ import (
 var (
 	// All Pod-level configuration keys we care about
 	podConfigKeys = []string{"tolerations", "affinity", "nodeSelector", "priorityClassName"}
+	// All Container-level configuration keys we care about we care about
+	containerConfigKeys = []string{"resources", "env", "envFrom", "volumeMounts"}
 )
 
 // InjectIntoValuesFile injects blocks into the values.yaml file
@@ -24,7 +26,7 @@ func InjectIntoValuesFile(chartDir string, blocks InjectorBlocks, referencedPath
 
 	valuesPath := filepath.Join(chartDir, "values.yaml")
 
-	// Read the values file. This should include previous changes we made.
+	// Read the values file. This should include previous changes we made in registry updates.
 	content, err := os.ReadFile(valuesPath)
 	if err != nil {
 		return fmt.Errorf("failed to read values.yaml: %v", err)
@@ -73,22 +75,33 @@ func InjectIntoValuesFile(chartDir string, blocks InjectorBlocks, referencedPath
 				}
 			case "nodeSelector":
 				injectedBlocks = getPodBlocksByKey(blocks["allPods"], "nodeSelector")
+
 			case "priorityClassName":
-				Logger.Infof("Processing priorityClassName with systemCritical=%s", systemCritical)
-				switch systemCritical {
-				case "node":
-					injectedBlocks = getBlocksByKey(blocks["systemCriticalNodePods"], "priorityClassName")
-					Logger.Infof("node: found %d blocks", len(injectedBlocks))
-				case "cluster":
-					injectedBlocks = getBlocksByKey(blocks["systemCriticalClusterPods"], "priorityClassName")
-					Logger.Infof("cluster: found %d blocks", len(injectedBlocks))
-				default:
-					injectedBlocks = getBlocksByKey(blocks["systemCriticalDefaultPods"], "priorityClassName")
-					Logger.Infof("default: found %d blocks", len(injectedBlocks))
-					// Non-system-critical pods get no priorityClassName injection
-				}
+				//DEBUG
+				//Logger.Infof("injected blocks before priorityClass: %v", injectedBlocks)
+
+				injectedBlocks = getPodBlocksByKey(blocks["allPods"], "priorityClassName")
+
+				//DEBUG
+				// Logger.Infof("injected blocks after allPods priorityClass: %v", injectedBlocks)
+				// fmt.Println("Press 'Enter' to continue...")
+				// fmt.Scanln()
+
+				// 	Logger.Infof("Processing priorityClassName with systemCritical=%s", systemCritical)
+				// 	switch systemCritical {
+				// 	case "node":
+				// 		injectedBlocks = getBlocksByKey(blocks["systemCriticalNodePods"], "priorityClassName")
+				// 		Logger.Infof("node: found %d blocks", len(injectedBlocks))
+				// 	case "cluster":
+				// 		injectedBlocks = getBlocksByKey(blocks["systemCriticalClusterPods"], "priorityClassName")
+				// 		Logger.Infof("cluster: found %d blocks", len(injectedBlocks))
+				// 	default:
+				// 		injectedBlocks = getBlocksByKey(blocks["systemCriticalDefaultPods"], "priorityClassName")
+				// 		Logger.Infof("default: found %d blocks", len(injectedBlocks))
+				// 		// Non-system-critical pods get no priorityClassName injection
+				// 	}
 			}
-		} else {
+		} else if slices.Contains(containerConfigKeys, ref.Key) {
 			// Container-level blocks - dynamically check all container blocks
 			injectedBlocks = getContainerBlocksByKey(blocks["allContainers"], ref.Key)
 			// If no blocks found, skip this key
@@ -96,6 +109,15 @@ func InjectIntoValuesFile(chartDir string, blocks InjectorBlocks, referencedPath
 				continue
 			}
 		}
+		// Add more cases as needed in future
+
+		//DEBUG
+		// Logger.Infof("Injected blocks: %v", injectedBlocks)
+		// //add puse and press any key to continue
+		// fmt.Println("Press 'Enter' to continue...")
+		// fmt.Scanln()
+
+		// Inject the blocks into the values file at the specified path
 
 		if len(injectedBlocks) > 0 {
 			newContent, changed, actuallyInjected := injectBlockIntoValuesPath(modifiedContent, ref, injectedBlocks, indentOffset)
@@ -176,7 +198,8 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 				if isEmpty {
 					// Empty inline value - but check if there's content on subsequent lines
 					// For complex nested structures (not list-based), check for existing content
-					if yl.Key == "affinity" || yl.Key == "tolerations" || isComplexNestedBlock(yl.Key, blocks) {
+
+					if slices.Contains(podConfigKeys, yl.Key) || isComplexNestedBlock(yl.Key, blocks) {
 						j := i + 1
 						hasExistingContent := false
 						for j < len(lines) {
@@ -203,6 +226,7 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 
 							if yl.Key == "tolerations" {
 								// For tolerations, collect existing and only add new ones (merge behavior)
+								// append the key line first ("tolerations:", "affinity:", etc.)
 								result = append(result, line)
 								var existingContent []string
 								j = i + 1
@@ -210,13 +234,13 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 									nextLine := lines[j]
 									nextIndent := getIndentation(nextLine)
 									nextTrimmed := strings.TrimSpace(nextLine)
-
+									// inject empty lines and comments as-is
 									if nextTrimmed == "" || strings.HasPrefix(nextTrimmed, "#") {
 										result = append(result, nextLine)
 										j++
 										continue
 									}
-
+									// if the indent is less than or equal to actualIndent, we've reached end of this block
 									if nextIndent <= actualIndent {
 										break
 									}
@@ -236,6 +260,8 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 										actuallyInjected = true
 									}
 								}
+								// Mark as injected even if all blocks already exist
+								actuallyInjected = true
 								i = j - 1
 								continue
 							} else if yl.Key == "affinity" || isComplexNestedBlock(yl.Key, blocks) {
@@ -251,11 +277,10 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 										j++
 										continue
 									}
-
+									// if the indent is less than or equal to actualIndent, we've reached end of this block
 									if nextIndent <= actualIndent {
 										break
 									}
-									// Skip this line (don't add to result)
 									j++
 								}
 
@@ -289,7 +314,7 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 
 					// For simple scalar values (like priorityClassName: "value"), replace the entire line
 					if !isComplexNestedBlock(yl.Key, blocks) && !isListBasedBlock(yl.Key, blocks) {
-						Logger.Infof("Found scalar value for key=%s, replacing with injected content", yl.Key)
+						Logger.Infof("Found scalar value for key %s:%s, replacing with injected content", yl.Key, yl.Value)
 						// Simple scalar value - replace with injected content
 						injected := injectBlockLines(blocks, actualIndent, yl.Key)
 						if len(injected) > 0 {
@@ -331,6 +356,7 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 							j++
 						}
 
+						//TO BE CONTINUED FROM HERE -------->>>>>>>>>>>>>>>> code duplication
 						// Check if blocks to inject already exist
 						injected := injectBlockLines(blocks, actualIndent+2, yl.Key)
 						for _, injLine := range injected {
@@ -341,6 +367,8 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 								actuallyInjected = true
 							}
 						}
+						// Mark as injected even if nothing was added (found existing tolerations)
+						actuallyInjected = true
 						i = j - 1
 						continue
 					} else if yl.Key == "affinity" || isComplexNestedBlock(yl.Key, blocks) {
@@ -374,42 +402,6 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 							result = append(result, injected...)
 							modified = true
 							actuallyInjected = true
-						}
-						i = j - 1
-						continue
-					} else if yl.Key == "tolerations" || isListBasedBlock(yl.Key, blocks) {
-						// For list-based blocks (tolerations, envFrom, env), append new items if not already present
-						var existingContent []string
-						j := i + 1
-						for j < len(lines) {
-							nextLine := lines[j]
-							nextIndent := getIndentation(nextLine)
-							nextTrimmed := strings.TrimSpace(nextLine)
-
-							if nextTrimmed == "" || strings.HasPrefix(nextTrimmed, "#") {
-								result = append(result, nextLine)
-								j++
-								continue
-							}
-
-							if nextIndent <= actualIndent {
-								break
-							}
-
-							result = append(result, nextLine)
-							existingContent = append(existingContent, nextTrimmed)
-							j++
-						}
-
-						// Check if blocks to inject already exist
-						injected := injectBlockLines(blocks, actualIndent+2, yl.Key)
-						for _, injLine := range injected {
-							injTrimmed := strings.TrimSpace(injLine)
-							if !containsLine(existingContent, injTrimmed) {
-								result = append(result, injLine)
-								modified = true
-								actuallyInjected = true
-							}
 						}
 						i = j - 1
 						continue

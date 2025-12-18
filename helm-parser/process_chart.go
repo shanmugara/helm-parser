@@ -37,12 +37,12 @@ func LoadValues(chartPath string) (map[interface{}]interface{}, error) {
 		log.Printf("Chart path %s does not exist", chartPath)
 		return nil, err
 	}
-	if _, err := os.Stat(chartPath + "/values.yaml"); os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(chartPath, "values.yaml")); os.IsNotExist(err) {
 		log.Printf("values.yaml does not exist in chart path %s", chartPath)
 		return nil, err
 	}
 	// Load values.yaml
-	valuesFilePath := chartPath + "/values.yaml"
+	valuesFilePath := filepath.Join(chartPath, "values.yaml")
 	valuesFile, err := os.ReadFile(valuesFilePath)
 	if err != nil {
 		log.Printf("Error reading values.yaml: %v", err)
@@ -59,54 +59,8 @@ func LoadValues(chartPath string) (map[interface{}]interface{}, error) {
 	return valuesMap, nil
 }
 
-// DEPRECATED: Use UpdateRegistryInValuesFile for text-based updates that preserve comments and order
-func replaceHub(m map[any]any, newRepo string) {
-	for k, v := range m {
-		switch val := v.(type) {
-		case map[any]any:
-			// Recurse into nested maps
-			replaceHub(val, newRepo)
-		case string:
-			if checkRegistryAttr(k) && val != "" {
-				// Parse the image reference to ensure it's valid
-				regNamed, err := reference.ParseNormalizedNamed(val)
-				if err != nil {
-					Logger.Fatalf("Error parsing image reference %s: %v", val, err)
-					continue
-				}
-				regPath := reference.Path(regNamed)
-				regPath = strings.TrimPrefix(regPath, "library/")
-				regDomain := reference.Domain(regNamed)
-				newRegNamed, err := reference.ParseNormalizedNamed(newRepo)
-				if err != nil {
-					Logger.Fatalf("Error parsing new repo reference %s: %v", newRepo, err)
-				}
-				newRegDomain := reference.Domain(newRegNamed)
-				newRegPath := reference.Path(newRegNamed)
-
-				// start with the registry domain found in the chart
-				newRepoJoined := regDomain
-
-				if regDomain != newRegDomain {
-					newRepoJoined = newRegDomain
-				}
-				if regPath != newRegPath {
-					// This maintains compatibility with current artifactory repo structures. Will need a new logic once we move to chainguard
-					newRepoJoined = path.Join(newRepoJoined, newRegPath, regDomain, regPath)
-					Logger.Infof("newRepoJoined: %s", newRepoJoined)
-				} else {
-					newRepoJoined = path.Join(newRepoJoined, regPath)
-					Logger.Infof("newRepoJoined: %s", newRepoJoined)
-				}
-
-				Logger.Infof("Updating hub from %s to %s", val, newRepoJoined)
-				m[k] = newRepoJoined
-			}
-		}
-	}
-}
-
 func checkRegistryAttr(key interface{}) bool {
+	// Check if the key is in the list of known registry attributes we defined
 	for _, attr := range RegistryAttrs {
 		if key == attr {
 			return true
@@ -124,19 +78,25 @@ func renderChartLocal(chartPath string, values map[string]interface{}) (*release
 		return nil, err
 	}
 
-	// Prepare release options for templating
+	// Prepare release options for templating, use default name and namespace
 	relOpts := chartutil.ReleaseOptions{
 		Name:      "test",
 		Namespace: "default",
 	}
 
 	// Create render values (chart values merged with release options and capabilities)
+	//type Capabilities struct {
+	//     KubeVersion KubeVersion      // Kubernetes version info
+	//     APIVersions VersionSet       // Available API versions (e.g., "apps/v1", "batch/v1")
+	//     HelmVersion HelmVersion      // Helm version info
+	// }
+	//
 	renderValues, err := chartutil.ToRenderValues(chart, values, relOpts, chartutil.DefaultCapabilities)
 	if err != nil {
 		Logger.Errorf("chartutil.ToRenderValues failed: %v\n values: %s", err, values)
 		return nil, err
 	}
-
+	// Render templates locally using Helm's engine
 	eng := engine.Engine{}
 	rendered, err := eng.Render(chart, renderValues)
 	if err != nil {
@@ -180,22 +140,6 @@ func convertMapI2MapS(i interface{}) interface{} {
 	}
 }
 
-// WriteUpdatedValuesFile writes the given values as YAML to <chartPath>/values.yaml
-// this for initial debugging and testing. Plan is to update the values.yaml in place and create a PR in Jenkins.
-// DEPRECATED: Use UpdateRegistryInValuesFile for text-based updates that preserve comments and order
-// func WriteUpdatedValuesFile(chartPath string, values interface{}) error {
-// 	outPath := filepath.Join(chartPath, "values.yaml")
-// 	data, err := yaml.Marshal(values)
-// 	if err != nil {
-// 		return fmt.Errorf("failed to marshal values to YAML: %w", err)
-// 	}
-// 	if err := os.WriteFile(outPath, data, 0644); err != nil {
-// 		return fmt.Errorf("failed to write values file %s: %w", outPath, err)
-// 	}
-// 	Logger.Infof("Wrote values to %s", outPath)
-// 	return nil
-// }
-
 // UpdateRegistryInValuesFile updates registry paths (hub, registry, repository) in values.yaml
 // while preserving comments, order, and formatting using text-based manipulation
 func UpdateRegistryInValuesFile(chartPath string, newRepo string) error {
@@ -214,26 +158,32 @@ func UpdateRegistryInValuesFile(chartPath string, newRepo string) error {
 	}
 	newRegDomain := reference.Domain(newRegNamed)
 	newRegPath := reference.Path(newRegNamed)
+	//DEBUG
+	Logger.Infof("Registry path to inject: %s, path: %s", newRegDomain, newRegPath)
 
-	modifiedContent := replaceRegistryInText(string(content), newRegDomain, newRegPath)
+	modifiedContent, modified := replaceRegistryInText(string(content), newRegDomain, newRegPath)
 
-	// Write back to file
+	// Write back to values.yaml file
 	if err := os.WriteFile(valuesPath, []byte(modifiedContent), 0644); err != nil {
 		return fmt.Errorf("failed to write updated values.yaml: %v", err)
 	}
-
-	Logger.Infof("Updated registry paths in %s", valuesPath)
+	if modified {
+		Logger.Infof("Updated registry paths in %s", valuesPath)
+	}
 	return nil
 }
 
 // replaceRegistryInText updates registry attribute values in YAML text while preserving format
-func replaceRegistryInText(content string, newRegDomain string, newRegPath string) string {
+func replaceRegistryInText(content string, newRegDomain string, newRegPath string) (string, bool) {
 	lines := strings.Split(content, "\n")
+	// result will hold modified lines to be written back to values.yaml
 	var result []string
+	var regpathKey bool
 
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]
 		trimmed := strings.TrimSpace(line)
+		regpathKey = false
 
 		// Skip empty lines and comments
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
@@ -248,31 +198,33 @@ func replaceRegistryInText(content string, newRegDomain string, newRegPath strin
 				key := strings.TrimSpace(parts[0])
 				value := strings.TrimSpace(parts[1])
 
-				// Check if key is a registry attribute
+				// Check if key is a known registry attribute
 				if checkRegistryAttr(key) && value != "" && value != `""` {
+					regpathKey = true
 					// Remove quotes if present
 					value = strings.Trim(value, `"`)
 
-					// Parse the current registry value
+					// Parse targget registry value
+					targetPrefix := path.Join(newRegDomain, newRegPath)
+					// Parse existing registry value
 					regNamed, err := reference.ParseNormalizedNamed(value)
 					if err != nil {
 						Logger.Warnf("Could not parse registry value %s: %v", value, err)
 						result = append(result, line)
 						continue
 					}
-
-					regPath := reference.Path(regNamed)
-					regPath = strings.TrimPrefix(regPath, "library/")
-					regDomain := reference.Domain(regNamed)
-
-					// Check if already using the target registry - if so, skip
-					targetPrefix := path.Join(newRegDomain, newRegPath)
-					currentPrefix := path.Join(regDomain, strings.Split(regPath, "/")[0])
-					if currentPrefix == targetPrefix {
-						Logger.Debugf("Skipping %s - already using target registry %s", key, targetPrefix)
+					//Check if we are already using the target registry
+					Logger.Infof("Checking existing registry value %s against target prefix %s", value, targetPrefix)
+					if strings.HasPrefix(value, targetPrefix) {
+						Logger.Infof("Skipping %s - already using target registry %s", key, targetPrefix)
 						result = append(result, line)
 						continue
 					}
+					// Extract existing registry components
+					regPath := reference.Path(regNamed)
+					// Remove "library/" prefix for Docker Hub official images
+					regPath = strings.TrimPrefix(regPath, "library/")
+					regDomain := reference.Domain(regNamed)
 
 					// Build new registry value
 					var newRepoJoined string
@@ -292,7 +244,7 @@ func replaceRegistryInText(content string, newRegDomain string, newRegPath strin
 					Logger.Infof("Updating %s from %s to %s", key, value, newRepoJoined)
 
 					// Reconstruct the line preserving indentation
-					indent := getIndentation(line)
+					indent := GetIndentation(line)
 					newLine := strings.Repeat(" ", indent) + key + ": " + newRepoJoined
 					result = append(result, newLine)
 					continue
@@ -302,8 +254,11 @@ func replaceRegistryInText(content string, newRegDomain string, newRegPath strin
 
 		result = append(result, line)
 	}
+	if !regpathKey {
+		Logger.Infof("No registry attribute keys found to update in values.yaml")
+	}
 
-	return strings.Join(result, "\n")
+	return strings.Join(result, "\n"), regpathKey
 }
 
 // splitDocuments splits a YAML manifest into documents using lines that are exactly
@@ -311,6 +266,7 @@ func replaceRegistryInText(content string, newRegDomain string, newRegPath strin
 // more robust than a simple string split since it handles CRLF and variations.
 func splitDocuments(manifest string) []string {
 	var docs []string
+	// create a scanner to read the manifest line by line
 	s := bufio.NewScanner(strings.NewReader(manifest))
 	// write lines to a buffer until we hit a document separator
 	// then save the buffer as a document in the docs slice and reset the buffer
@@ -329,11 +285,12 @@ func splitDocuments(manifest string) []string {
 		sb.WriteString(line)
 		sb.WriteString("\n")
 	}
-	// append final
+	// append final and error check
 	if err := s.Err(); err != nil {
 		// If scanning fails, fall back to whole manifest as one doc
 		return []string{manifest}
 	}
+	// we need handle the last document after the loop exists we won't see a separator --- or ... for the last doc
 	last := strings.TrimSpace(sb.String())
 	if last != "" {
 		docs = append(docs, last)
@@ -354,25 +311,25 @@ func ProcessChart(chartPath string, localRepo string, customYaml string, critica
 		return err
 	}
 
-	// Load values.yaml from chart and update hub to localRepo
+	// First load values.yaml from chart
 	values, err := LoadValues(chartPath)
 	if err != nil {
 		Logger.Fatalf("failed to load values: %v", err)
 		return err
 	}
-	// First update the registry names in values to localRepo and render the chart
-	err = UpdateRegistryName(chartPath, values, localRepo)
+	// Next update the registry names in values to our localRepo and render the chart
+	err = UpdateRegistryInValuesFile(chartPath, localRepo)
 	if err != nil {
 		Logger.Fatalf("failed to update registry name: %v", err)
 		return err
 	}
-	// Render the chart locally with updated values
+	// After updating values.yaml, render the chart locally with updated values
 	rel, err := renderChartFromValues(chartPath)
 	if err != nil {
 		Logger.Errorf("failed to render chart from updated values: %v", err)
 		return err
 	}
-	// Parse rendered manifest and extract images from pod specs
+	// Parse rendered manifest and extract images from pod specs so that we can check if they exist
 	images, err := ExtractImagesFromManifest(rel.Manifest)
 	if err != nil {
 		Logger.Errorf("failed to extract images from manifest: %v", err)
@@ -407,11 +364,7 @@ func ProcessChart(chartPath string, localRepo string, customYaml string, critica
 		}
 		Logger.Errorf("one or more images do not exist in registry")
 	}
-
-	// Note: Registry updates are already done by UpdateRegistryInValuesFile() using text-based manipulation
-	// which preserves comments and order. We don't call WriteUpdatedValuesFile() here because it uses
-	// yaml.Marshal which would lose comments and reorder keys.
-
+	// Next we process the chart teamplates to inject other inline injector blocks
 	// Process templates to inject inline injector container spec
 	err = ProcessTemplates(chartPath, values, customYaml, criticalDs, controlPlane, systemCritical)
 	if err != nil {

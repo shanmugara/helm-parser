@@ -384,6 +384,8 @@ func getPodBlocksByKey(blocks []string, key string) []string {
 			result = append(result, block)
 		}
 	}
+	//DEBUG
+	//Logger.Infof("getPodBlocksByKey result: %v", result)
 	return result
 }
 

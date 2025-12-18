@@ -15,7 +15,7 @@ import (
 // and locates where the pod spec and container specs are defined, then adds the appropriate inline injector blocks.
 // If templates reference .Values, it injects into values.yaml instead of directly into templates.
 func ProcessTemplates(chartDir string, values map[any]any, customYaml string, criticalDs bool, controlPlane bool, systemCritical string) error {
-	// Load blocks once for all templates
+	// First load custom injector blocks once for all templates
 	blocks, err := loadInjectorBlocks(customYaml, systemCritical)
 	if err != nil {
 		return fmt.Errorf("failed to load injector blocks: %v", err)
@@ -299,6 +299,17 @@ func loadInjectorBlocks(customYaml string, systemCritical string) (InjectorBlock
 
 	// Convert each block to a string representation
 	blocks := make(InjectorBlocks)
+
+	// Expected structure:
+	//allPods: (catergory)
+	// - priorityClassName: system-cluster-critical
+	// - tolerations:
+	//   - key: addons.kaas.bloomberg.com/unavailable
+	//     operator: "Exists"
+	//     effect: NoSchedule
+	// - affinity:
+	//     nodeAffinity:
+	// and so on...
 	for category, blockList := range rawBlocks {
 		blocks[category] = make([]string, 0, len(blockList))
 		for _, block := range blockList {
@@ -311,20 +322,21 @@ func loadInjectorBlocks(customYaml string, systemCritical string) (InjectorBlock
 		}
 	}
 
-	switch systemCritical {
-	case "node":
-		if critBlocks, ok := blocks["systemCriticalNodePods"]; ok {
-			blocks["allPods"] = append(blocks["allPods"], critBlocks...)
-		}
-	case "cluster":
-		if critBlocks, ok := blocks["systemCriticalClusterPods"]; ok {
-			blocks["allPods"] = append(blocks["allPods"], critBlocks...)
-		}
-	default:
-		if critBlocks, ok := blocks["systemCriticalDefaultPods"]; ok {
-			blocks["allPods"] = append(blocks["allPods"], critBlocks...)
-		}
-	}
+	// COMMENT OUT TO DEBUG
+	// switch systemCritical {
+	// case "node":
+	// 	if critBlocks, ok := blocks["systemCriticalNodePods"]; ok {
+	// 		blocks["allPods"] = append(blocks["allPods"], critBlocks...)
+	// 	}
+	// case "cluster":
+	// 	if critBlocks, ok := blocks["systemCriticalClusterPods"]; ok {
+	// 		blocks["allPods"] = append(blocks["allPods"], critBlocks...)
+	// 	}
+	// default:
+	// 	if critBlocks, ok := blocks["systemCriticalDefaultPods"]; ok {
+	// 		blocks["allPods"] = append(blocks["allPods"], critBlocks...)
+	// 	}
+	// }
 	//DEBUG
 	// fmt.Printf("Loaded injector blocks: %+v\n", blocks)
 	// fmt.Println("Press Enter to continue...")

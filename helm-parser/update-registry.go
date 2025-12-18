@@ -14,61 +14,38 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-func UpdateRegistryName(chartPath string, values map[interface{}]interface{}, localRepo string) error {
-	// Update registry paths in values.yaml using text-based manipulation
-	// This preserves comments, order, and formatting
-	if err := UpdateRegistryInValuesFile(chartPath, localRepo); err != nil {
-		Logger.Errorf("failed to update registry in values file: %v", err)
-		return err
-	}
-	return nil
+//DEPRECATED
+// func UpdateRegistryName(chartPath string, values map[interface{}]interface{}, localRepo string) error {
+// 	// Update registry paths in values.yaml using text-based manipulation
+// 	// This preserves comments, order, and formatting
+// 	if err := UpdateRegistryInValuesFile(chartPath, localRepo); err != nil {
+// 		Logger.Errorf("failed to update registry in values file: %v", err)
+// 		return err
+// 	}
+// 	return nil
 
-	// // Read the updated values back for rendering
-	// valuesPath := filepath.Join(chartPath, "values.yaml")
-	// updatedValues, err := os.ReadFile(valuesPath)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("failed to read updated values: %v", err)
-	// }
-
-	// // Parse updated values - unmarshal into map[interface{}]interface{} first
-	// var valuesMapI map[interface{}]interface{}
-	// if err := yaml.Unmarshal(updatedValues, &valuesMapI); err != nil {
-	// 	return nil, fmt.Errorf("failed to unmarshal updated values: %v", err)
-	// }
-
-	// // Convert to map[string]interface{} recursively to avoid JSON schema validation errors
-	// valuesMap := convertMapI2MapS(valuesMapI).(map[string]interface{})
-
-	// // Now render the chart with updated values
-	// rel, err := renderChartLocal(chartPath, valuesMap)
-	// if err != nil {
-	// 	Logger.Errorf("error rendering chart: %s", err)
-	// 	return nil, err
-	// }
-
-	// return rel, nil
-}
+// }
 
 func ExtractImagesFromManifest(manifest string) ([]string, error) {
 	var images []string
-
+	// Split manifest into separate yaml documents
 	parts := splitDocuments(manifest)
 	for i, p := range parts {
 		p = strings.TrimSpace(p)
 		if p == "" {
 			continue
 		}
-
+		// Parse each yaml document
 		var doc interface{}
 		if err := yaml.Unmarshal([]byte(p), &doc); err != nil {
 			Logger.Warnf("skipping document %d due to yaml unmarshal error: %v", i, err)
 			continue
 		}
-
+		// Recursively collect images from pod specs
 		collectImagesRecursive(doc, &images)
 	}
 
-	// Deduplicate
+	// Deduplicate and create a unique list
 	seen := map[string]struct{}{}
 	uniq := make([]string, 0, len(images))
 	for _, img := range images {
@@ -89,9 +66,12 @@ func collectImagesRecursive(node interface{}, images *[]string) {
 		for k, v := range n {
 			key := fmt.Sprintf("%v", k)
 			if key == "containers" || key == "initContainers" {
+				// if we find containers or initContainers, assert it's a slice of interfaces
+				// and extract images
 				if sl, ok := v.([]interface{}); ok {
 					for _, item := range sl {
 						switch it := item.(type) {
+						// for each item check if it is an image and extract images
 						case map[interface{}]interface{}:
 							if img := getImageFromMapI(it); img != "" {
 								*images = append(*images, img)
@@ -104,6 +84,7 @@ func collectImagesRecursive(node interface{}, images *[]string) {
 					}
 				}
 			} else {
+				// if not containers/initContainers, recurse rinse and repeat
 				collectImagesRecursive(v, images)
 			}
 		}
@@ -151,6 +132,7 @@ func getImageFromMapS(m map[string]interface{}) string {
 	return ""
 }
 
+// Using goroutines and concurrency to check multiple images in parallel.. faster
 func CheckImagesExist(ctx context.Context, images []string, username, password string) (map[string]bool, error) {
 	concurrency := 4
 	timeout := 30 * time.Second
