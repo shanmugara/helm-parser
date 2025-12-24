@@ -10,18 +10,29 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+func getKeys(m map[string][]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 // ProcessTemplates goes through the chart directory and if the template file contains a kubernetes resource kind like Deployment, StatefulSet, DaemonSet, Job, CronJob,
 // adds inline injector specs to both the pod and container levels. It reads the template file, parses it as text,
 // and locates where the pod spec and container specs are defined, then adds the appropriate inline injector blocks.
 // If templates reference .Values, it injects into values.yaml instead of directly into templates.
-func ProcessTemplates(chartDir string, values map[any]any, customYaml string, criticalDs bool, controlPlane bool, systemCritical string) error {
+func ProcessTemplates(chartDir string, values map[any]any, customYaml string, criticalDs bool, controlPlane bool) error {
 	// First load custom injector blocks once for all templates
-	blocks, err := loadInjectorBlocks(customYaml, systemCritical)
+	blocks, err := loadInjectorBlocks(customYaml)
 	if err != nil {
 		return fmt.Errorf("failed to load injector blocks: %v", err)
 	}
 
 	// Track which .Values paths are referenced across all templates
+	// We need kno wknow which specs are defined as .Values templated references
+	// in each template file, sp we know if we need to inject into values.yaml instead of inline
+	// in the second pass
 	var allValueReferences []ValueReference
 	seenPaths := make(map[string]bool)
 
@@ -31,7 +42,7 @@ func ProcessTemplates(chartDir string, values map[any]any, customYaml string, cr
 	}
 
 	// First pass: detect all .Values references
-	err = filepath.Walk(templatesPath, func(path string, info os.FileInfo, err error) error {
+	err = filepath.WalkDir(templatesPath, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -61,15 +72,22 @@ func ProcessTemplates(chartDir string, values map[any]any, customYaml string, cr
 	// if templates reference .Values, and if we find our custom injector block keys in values.yaml,
 	// inject custom values into values.yaml instead of directly into templates
 	if len(allValueReferences) > 0 {
-		//DEBUG
-		//Logger.Infof("Detected .Values references: %v", allValueReferences)
-		if err := InjectIntoValuesFile(chartDir, blocks, allValueReferences, criticalDs, controlPlane, systemCritical); err != nil {
+		// Skip newValues - they're already injected in ProcessChart pre-render phase
+		// This "newValues" logic needs to be removed from here and needs to be handled separately
+		blocksForTemplatePhase := make(InjectorBlocks)
+		for key, value := range blocks {
+			if key != "newValues" {
+				blocksForTemplatePhase[key] = value
+			}
+		}
+
+		if err := InjectIntoValuesFile(chartDir, blocksForTemplatePhase, allValueReferences, criticalDs, controlPlane); err != nil {
 			Logger.Warnf("Failed to inject into values.yaml: %v", err)
 		}
 	}
 
 	// Second pass: process templates (inject directly only if not using .Values)
-	err = filepath.Walk(templatesPath, func(path string, info os.FileInfo, err error) error {
+	err = filepath.WalkDir(templatesPath, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -202,7 +220,7 @@ func ProcessTemplates(chartDir string, values map[any]any, customYaml string, cr
 				}
 			} // Write back the modified content if we made changes
 			if modified {
-				if err := os.WriteFile(path, []byte(modifiedContent), info.Mode()); err != nil {
+				if err := os.WriteFile(path, []byte(modifiedContent), info.Type().Perm()); err != nil {
 					return fmt.Errorf("failed to write modified template file %s: %v", path, err)
 				}
 			}
@@ -212,6 +230,12 @@ func ProcessTemplates(chartDir string, values map[any]any, customYaml string, cr
 	if err != nil {
 		return err
 	}
+
+	// Apply custom file modifications (e.g., template-specific injections)
+	// if err := ApplyCustomFileMods(chartDir, customYaml); err != nil {
+	// 	Logger.Warnf("Failed to apply custom file modifications: %v", err)
+	// }
+
 	return nil
 }
 
@@ -283,7 +307,7 @@ func getK8sResourceKind(s string) string {
 // Each category (allPods, allContainers, etc.) contains a list of YAML block strings
 type InjectorBlocks map[string][]string
 
-func loadInjectorBlocks(customYaml string, systemCritical string) (InjectorBlocks, error) {
+func loadInjectorBlocks(customYaml string) (InjectorBlocks, error) {
 	// Read yaml file from disk
 	data, err := os.ReadFile(customYaml)
 	if err != nil {
@@ -296,6 +320,11 @@ func loadInjectorBlocks(customYaml string, systemCritical string) (InjectorBlock
 	if err := yaml.Unmarshal(data, &rawBlocks); err != nil {
 		return nil, fmt.Errorf("failed to parse %s: %v", customYaml, err)
 	}
+
+	// Logger.Infof("DEBUG loadInjectorBlocks: rawBlocks keys: %v", getKeys(rawBlocks))
+	// if newVals, ok := rawBlocks["newValues"]; ok {
+	// 	Logger.Infof("DEBUG loadInjectorBlocks: newValues has %d blocks", len(newVals))
+	// }
 
 	// Convert each block to a string representation
 	blocks := make(InjectorBlocks)
@@ -322,28 +351,14 @@ func loadInjectorBlocks(customYaml string, systemCritical string) (InjectorBlock
 		}
 	}
 
-	// COMMENT OUT TO DEBUG
-	// switch systemCritical {
-	// case "node":
-	// 	if critBlocks, ok := blocks["systemCriticalNodePods"]; ok {
-	// 		blocks["allPods"] = append(blocks["allPods"], critBlocks...)
-	// 	}
-	// case "cluster":
-	// 	if critBlocks, ok := blocks["systemCriticalClusterPods"]; ok {
-	// 		blocks["allPods"] = append(blocks["allPods"], critBlocks...)
-	// 	}
-	// default:
-	// 	if critBlocks, ok := blocks["systemCriticalDefaultPods"]; ok {
-	// 		blocks["allPods"] = append(blocks["allPods"], critBlocks...)
-	// 	}
-	// }
-	//DEBUG
-	// fmt.Printf("Loaded injector blocks: %+v\n", blocks)
-	// fmt.Println("Press Enter to continue...")
-	// bufio.NewReader(os.Stdin).ReadBytes('\n')
-
 	return blocks, nil
 }
+
+// loadInjectorBlocksForNewValues is a lightweight version that only loads newValues
+// Used before rendering to ensure values exist for template references
+//func loadInjectorBlocksForNewValues(customYaml string) (InjectorBlocks, error) {
+//	return loadInjectorBlocks(customYaml)
+//}
 
 func CheckHelmTemplateDir(templatePath string) bool {
 	if _, err := os.Stat(templatePath); err != nil {
@@ -352,6 +367,7 @@ func CheckHelmTemplateDir(templatePath string) bool {
 	return true
 }
 
+// Not used
 func GetTemplateFiles(templatePath string) ([]string, error) {
 	if !CheckHelmTemplateDir(templatePath) {
 		return nil, nil

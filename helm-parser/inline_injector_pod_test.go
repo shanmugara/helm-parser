@@ -6,7 +6,7 @@ import (
 )
 
 func TestInjectInlinePodSpec_Basic(t *testing.T) {
-	blocks, err := loadInjectorBlocks("inject-blocks.yaml", "")
+	blocks, err := loadInjectorBlocks("inject-blocks.yaml")
 	if err != nil {
 		t.Fatalf("Failed to load blocks: %v", err)
 	}
@@ -59,7 +59,7 @@ spec:
 }
 
 func TestInjectInlinePodSpec_ExistingTolerations(t *testing.T) {
-	blocks, err := loadInjectorBlocks("inject-blocks.yaml", "")
+	blocks, err := loadInjectorBlocks("inject-blocks.yaml")
 	if err != nil {
 		t.Fatalf("Failed to load blocks: %v", err)
 	}
@@ -108,7 +108,7 @@ spec:
 }
 
 func TestInjectInlinePodSpec_Idempotent(t *testing.T) {
-	blocks, err := loadInjectorBlocks("inject-blocks.yaml", "")
+	blocks, err := loadInjectorBlocks("inject-blocks.yaml")
 	if err != nil {
 		t.Fatalf("Failed to load blocks: %v", err)
 	}
@@ -153,7 +153,7 @@ spec:
 }
 
 func TestInjectInlinePodSpec_NotUnderTemplate(t *testing.T) {
-	blocks, err := loadInjectorBlocks("inject-blocks.yaml", "")
+	blocks, err := loadInjectorBlocks("inject-blocks.yaml")
 	if err != nil {
 		t.Fatalf("Failed to load blocks: %v", err)
 	}
@@ -230,7 +230,7 @@ spec:
 }
 
 func TestInjectInlinePodSpec_PodKind(t *testing.T) {
-	blocks, err := loadInjectorBlocks("inject-blocks.yaml", "")
+	blocks, err := loadInjectorBlocks("inject-blocks.yaml")
 	if err != nil {
 		t.Fatalf("Failed to load blocks: %v", err)
 	}
@@ -298,7 +298,7 @@ spec:
 }
 
 func TestInjectInlinePodSpec_HelmTemplate(t *testing.T) {
-	blocks, err := loadInjectorBlocks("inject-blocks.yaml", "")
+	blocks, err := loadInjectorBlocks("inject-blocks.yaml")
 	if err != nil {
 		t.Fatalf("Failed to load blocks: %v", err)
 	}

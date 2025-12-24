@@ -1,0 +1,183 @@
+---
+# allPods: These settings are applied to all pods in all charts
+# priorityClassName: Set the priority class name for all pods (set this according the chart)
+allPods:
+- annotations:
+    "secret.reloader.stakater.com/reload": "bsso-idx-proxy"
+- priorityClassName: system-cluster-critical
+- tolerations:
+  - key: addons.kaas.bloomberg.com/unavailable
+    operator: "\"Exists\""
+    effect: NoSchedule
+- affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: kubernetes.io/role
+                operator: NotIn
+                values:
+                  - monitor
+
+
+#  allContainers: These settings are applied to all containers in all charts
+allContainers:
+- envFrom:
+  - configMapRef:
+      # Allow KUBERNETES_SERVICE_HOST and KUBERNETES_SERVICE_PORT to be overridden
+      name: kubernetes-services-endpoint
+      optional: true
+
+# criticalDsPods: Tolerations applied to all critical DaemonSet pods in all charts
+criticalDsPods:
+- tolerations:
+  - operator: "\"Exists\""
+    effect: NoSchedule
+
+# controlPlanePods: Tolerations and affinity applied to all control plane pods in all charts
+controlPlanePods:
+- tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: "\"Exists\""
+    effect: NoSchedule
+- affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: "\"Exists\""
+
+# service spec injections to values.yaml file
+# serviceSpec:
+# - type: NodePort
+
+# custom new values to inject into values.yaml file. if the value already exists, it will not be overwritten
+newValues:
+- app:
+   securityContext:
+     runAsUser: 1001
+
+- bssoIDXProxy:
+    enabled: false
+    role: bsso
+    image:
+      ## Repository for container
+      repository: artifactory.inf.bloomberg.com/kubernetesinfrastructure/bsso-idx-proxy
+      tag: v0.0.4
+      pullPolicy: IfNotPresent
+
+    # Port is the port that the bsso-IDX proxy listens on
+    port: 3000
+    # IMPORTANT: Configure these depending on how IDX and BSSO were
+    # configured
+    bssoUseProd: "true"
+    bssoClientID: "kube-dashboard"
+    bssoClientSecret:
+      name: "bsso-idx-proxy"
+      key: "bsso-client-secret"
+    idxURL: "https://identity-exchange.dna.prod.bloomberg.com/api/v1/exchange"
+    idxInputTokenType: "urn:bloomberg:jwt:bsso-id-kube-dashboard"
+    idxOutputTokenType: "urn:bloomberg:archer:kaas"
+    idxActorTokenType: "urn:bloomberg:archer:managed-compute"
+    idxActorTokenSecret:
+      name: "bsso-idx-proxy"
+      key: "idx-actor-token"
+    # The redirect URL
+    # Note: this must end with /login/oauth2/redirect
+    bssoRedirectURL: "https://kube-dashboard/login/oauth2/redirect"
+
+# This section defines custom file modifications for specific templates,
+# These blocks of template code will be injected into specified locations in the target files.
+# we use text anchors to identify where to insert the blocks. The anchors are sequences of lines
+# that uniquely identify the insertion point and must appear in the target file in the specified order.
+customFileMods:
+# Target file is templates/deployments/web.yaml
+- file: templates/deployments/web.yaml
+  modifications:
+    - name: "Add bsso idx condition"
+      anchorLines:
+      - "{{- with .Values.web.containers.resources }}"
+      - "resources:"
+      - "{{ toYaml . | nindent 12 }}"
+      - "{{- end }}"
+      position: after  # insert after matching this sequence
+      indent: 0
+      block: |
+        {{- if .Values.bssoIDXProxy.enabled }}
+        - name: bsso-idx-proxy
+          image: "{{ .Values.bssoIDXProxy.image.repository }}:{{ .Values.bssoIDXProxy.image.tag }}"
+          imagePullPolicy: {{ .Values.bssoIDXProxy.image.pullPolicy }}
+          env:
+            - name: PORT
+              value: "{{ .Values.bssoIDXProxy.port }}"
+            - name: DEBUG
+              value: "1"
+            - name: BSSO_USE_PROD
+              value: "{{ .Values.bssoIDXProxy.bssoUseProd }}"
+            - name: BSSO_CLIENT_ID
+              value: "{{ .Values.bssoIDXProxy.bssoClientID }}"
+            - name: BSSO_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: "{{ .Values.bssoIDXProxy.bssoClientSecret.name }}"
+                  key: "{{ .Values.bssoIDXProxy.bssoClientSecret.key }}"
+            - name: IDX_INPUT_TOKEN_TYPE
+              value: "{{ .Values.bssoIDXProxy.idxInputTokenType }}"
+            - name: IDX_OUTPUT_TOKEN_TYPE
+              value: "{{ .Values.bssoIDXProxy.idxOutputTokenType }}"
+            - name: IDX_ACTOR_TOKEN_TYPE
+              value: "{{ .Values.bssoIDXProxy.idxActorTokenType }}"
+            - name: IDX_ACTOR_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: "{{ .Values.bssoIDXProxy.idxActorTokenSecret.name }}"
+                  key: "{{ .Values.bssoIDXProxy.idxActorTokenSecret.key }}"
+            - name: IDX_URL
+              value: "{{ .Values.bssoIDXProxy.idxURL }}"
+            - name: REDIRECT_URL
+              value: "{{ .Values.bssoIDXProxy.bssoRedirectURL }}"
+            - name: PROXY_TARGET_URL
+              value: "http://localhost:8000"
+            - name: PROXY_TARGET_CA_PATH
+              value: ""
+          ports:
+            - name: {{ .Values.bssoIDXProxy.role }}
+              containerPort: {{ .Values.bssoIDXProxy.port }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              scheme: HTTP
+              path: /healthz
+              port: {{ .Values.bssoIDXProxy.port }}
+            initialDelaySeconds: 1
+            timeoutSeconds: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+        {{- end }}
+
+- file: templates/services/web.yaml
+  modifications:
+    - name: "Add bsso idx condition to service"
+      anchorLines:
+      - "ports:"
+      position: after  # insert after matching this sequence
+      indent: 2 # indent the block by 2 spaces within the parent anchor
+      block: |
+        {{- if .Values.bssoIDXProxy.enabled }}
+        - name: {{ .Values.bssoIDXProxy.role }}
+          targetPort: {{ .Values.bssoIDXProxy.role }}
+        {{- else }}
+- file: templates/services/web.yaml
+  modifications:
+    - name: "Add bsso idx condition to service close"
+      anchorLines:
+        - "- name: {{ .Values.web.role }}"
+      position: after  # insert after matching this sequence
+      block: |
+        {{- end }}

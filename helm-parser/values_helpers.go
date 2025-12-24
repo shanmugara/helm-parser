@@ -33,8 +33,228 @@ func containsLine(lines []string, target string) bool {
 	return false
 }
 
+// collectPodBlocks gathers pod blocks for a given key with criticalDs and controlPlane additions
+func collectPodBlocks(blocks InjectorBlocks, key string, criticalDs, controlPlane bool) []string {
+	injectedBlocks := getPodBlocksByKey(blocks["allPods"], key)
+	if criticalDs {
+		critDsBlocks := getPodBlocksByKey(blocks["criticalDsPods"], key)
+		injectedBlocks = append(injectedBlocks, critDsBlocks...)
+	}
+	if controlPlane {
+		cpBlocks := getPodBlocksByKey(blocks["controlPlanePods"], key)
+		injectedBlocks = append(injectedBlocks, cpBlocks...)
+	}
+	return injectedBlocks
+}
+
+// mergeTolerations collects existing tolerations and merges with new blocks
+// Returns updated result slice, next line index, and modification flags
+func mergeTolerations(lines []string, result []string, i, actualIndent int, blocks []string, line string) ([]string, int, bool, bool) {
+	result = append(result, line)
+	var existingContent []string
+	j := i + 1
+	modified := false
+	actuallyInjected := true
+
+	// Collect existing tolerations content
+	for j < len(lines) {
+		nextLine := lines[j]
+		nextIndent := getIndentation(nextLine)
+		nextTrimmed := strings.TrimSpace(nextLine)
+
+		if nextTrimmed == "" || strings.HasPrefix(nextTrimmed, "#") {
+			result = append(result, nextLine)
+			j++
+			continue
+		}
+
+		if nextIndent <= actualIndent {
+			break
+		}
+
+		result = append(result, nextLine)
+		existingContent = append(existingContent, nextLine)
+		j++
+	}
+
+	// Parse existing tolerations to structured format for comparison
+	existingYaml := "tolerations:\n" + strings.Join(existingContent, "\n")
+	var existingTolerations map[string]interface{}
+	existingParsed := []map[string]interface{}{}
+	if err := yaml.Unmarshal([]byte(existingYaml), &existingTolerations); err == nil {
+		if tolList, ok := existingTolerations["tolerations"].([]interface{}); ok {
+			for _, tol := range tolList {
+				if tolMap, ok := tol.(map[interface{}]interface{}); ok {
+					// Convert to string keys
+					converted := make(map[string]interface{})
+					for k, v := range tolMap {
+						if keyStr, ok := k.(string); ok {
+							converted[keyStr] = v
+						}
+					}
+					existingParsed = append(existingParsed, converted)
+				}
+			}
+		}
+	}
+	Logger.Infof("DEBUG mergeTolerations: Found %d existing tolerations", len(existingParsed))
+	for idx, tol := range existingParsed {
+		Logger.Infof("  Existing[%d]: %+v", idx, tol)
+	}
+
+	// Parse blocks to inject and collect only non-duplicate tolerations
+	newTolerationsToAdd := []map[interface{}]interface{}{}
+
+	Logger.Infof("DEBUG mergeTolerations: Checking %d blocks to inject", len(blocks))
+	for blockIdx, block := range blocks {
+		Logger.Infof("DEBUG Block[%d]:\n%s", blockIdx, block)
+		var blockData map[string]interface{}
+		if err := yaml.Unmarshal([]byte(block), &blockData); err != nil {
+			Logger.Infof("DEBUG Block[%d]: Failed to parse: %v", blockIdx, err)
+			continue // Skip unparseable blocks
+		}
+
+		if tolList, ok := blockData["tolerations"].([]interface{}); ok {
+			Logger.Infof("DEBUG Block[%d]: Found %d tolerations", blockIdx, len(tolList))
+			for tolIdx, tol := range tolList {
+				if tolMap, ok := tol.(map[interface{}]interface{}); ok {
+					// Convert to string keys for comparison
+					newTol := make(map[string]interface{})
+					for k, v := range tolMap {
+						if keyStr, ok := k.(string); ok {
+							newTol[keyStr] = v
+						}
+					}
+
+					Logger.Infof("DEBUG Block[%d] Tol[%d]: %+v", blockIdx, tolIdx, newTol)
+
+					// Check if this toleration already exists
+					exists := false
+					for existIdx, existing := range existingParsed {
+						if tolerationsMatch(existing, newTol) {
+							Logger.Infof("DEBUG Block[%d] Tol[%d]: MATCHES Existing[%d]", blockIdx, tolIdx, existIdx)
+							exists = true
+							break
+						}
+					}
+
+					// Only add if it doesn't exist
+					if !exists {
+						Logger.Infof("DEBUG Block[%d] Tol[%d]: NEW - adding to inject list", blockIdx, tolIdx)
+						newTolerationsToAdd = append(newTolerationsToAdd, tolMap)
+					}
+				}
+			}
+		}
+	}
+
+	Logger.Infof("DEBUG mergeTolerations: Will inject %d new tolerations", len(newTolerationsToAdd))
+
+	// If we have new tolerations to add, construct a single block and inject it
+	if len(newTolerationsToAdd) > 0 {
+		// Create a YAML block with just the new tolerations
+		newBlock := map[string]interface{}{
+			"tolerations": newTolerationsToAdd,
+		}
+		blockYaml, _ := yaml.Marshal(newBlock)
+		blockStr := string(blockYaml)
+
+		// Inject using standard method
+		injected := injectBlockLines([]string{blockStr}, actualIndent+2, "tolerations")
+		result = append(result, injected...)
+		modified = true
+	}
+
+	return result, j, modified, actuallyInjected
+}
+
+// tolerationsMatch checks if two toleration maps are equivalent
+func tolerationsMatch(a, b map[string]interface{}) bool {
+	// Compare key fields: key, operator, effect, value, tolerationSeconds
+	fields := []string{"key", "operator", "effect", "value", "tolerationSeconds"}
+	for _, field := range fields {
+		aVal, aHas := a[field]
+		bVal, bHas := b[field]
+
+		if aHas != bHas {
+			return false
+		}
+
+		if aHas && fmt.Sprintf("%v", aVal) != fmt.Sprintf("%v", bVal) {
+			return false
+		}
+	}
+	return true
+}
+
+// handleComplexNestedBlock replaces existing content for complex blocks like affinity
+// Returns updated result slice, next line index, and modification flags
+func handleComplexNestedBlock(lines []string, result []string, i, actualIndent int, blocks []string, yl YAMLLine, replaceContent bool) ([]string, int, bool, bool) {
+	j := i + 1
+	hasExistingContent := false
+
+	for j < len(lines) {
+		nextLine := lines[j]
+		nextIndent := getIndentation(nextLine)
+		nextTrimmed := strings.TrimSpace(nextLine)
+
+		if nextTrimmed == "" || strings.HasPrefix(nextTrimmed, "#") {
+			if !replaceContent {
+				result = append(result, nextLine)
+			}
+			j++
+			continue
+		}
+
+		if nextIndent <= actualIndent {
+			break
+		}
+
+		if !replaceContent {
+			result = append(result, nextLine)
+		}
+		hasExistingContent = true
+		j++
+	}
+
+	modified := false
+	actuallyInjected := false
+
+	if replaceContent {
+		// Replace mode: inject new content
+		result = append(result, strings.Repeat(" ", actualIndent)+yl.Key+":")
+		injected := injectBlockLines(blocks, actualIndent+2, yl.Key)
+		result = append(result, injected...)
+		modified = true
+		actuallyInjected = true
+	} else if !hasExistingContent {
+		// Check mode: only inject if no existing content
+		injected := injectBlockLines(blocks, actualIndent+2, yl.Key)
+		result = append(result, injected...)
+		modified = true
+		actuallyInjected = true
+	}
+
+	return result, j, modified, actuallyInjected
+}
+
 // getContainerBlocksByKey returns container blocks that have the specified top-level key
 func getContainerBlocksByKey(blocks []string, key string) []string {
+	var result []string
+	for _, block := range blocks {
+		var blockData map[string]interface{}
+		if err := yaml.Unmarshal([]byte(block), &blockData); err != nil {
+			continue
+		}
+		if _, ok := blockData[key]; ok {
+			result = append(result, block)
+		}
+	}
+	return result
+}
+
+// getServiceBlocksByKey returns service blocks that have the specified top-level key
+func getServiceBlocksByKey(blocks []string, key string) []string {
 	var result []string
 	for _, block := range blocks {
 		var blockData map[string]interface{}

@@ -22,7 +22,7 @@ spec:
           - name: TEST_VAR
             value: test`
 
-	result, err := injectInlineContainerSpec(input, "inject-blocks.yaml", "")
+	result, err := injectInlineContainerSpec(input, "inject-blocks.yaml")
 	if err != nil {
 		t.Fatalf("injectInlineContainerSpec failed: %v", err)
 	}
@@ -76,7 +76,7 @@ spec:
           - name: TEST_VAR
             value: test`
 
-	result, err := injectInlineContainerSpec(input, "inject-blocks.yaml", "")
+	result, err := injectInlineContainerSpec(input, "inject-blocks.yaml")
 	if err != nil {
 		t.Fatalf("injectInlineContainerSpec failed: %v", err)
 	}

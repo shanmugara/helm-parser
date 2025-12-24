@@ -6,7 +6,7 @@ import (
 )
 
 func TestLoadInjectorBlocks(t *testing.T) {
-	blocks, err := loadInjectorBlocks("inject-blocks.yaml", "")
+	blocks, err := loadInjectorBlocks("inject-blocks.yaml")
 	if err != nil {
 		t.Fatalf("loadInjectorBlocks failed: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestLoadInjectorBlocks(t *testing.T) {
 }
 
 func TestLoadInjectorBlocks_Structure(t *testing.T) {
-	blocks, err := loadInjectorBlocks("inject-blocks.yaml", "")
+	blocks, err := loadInjectorBlocks("inject-blocks.yaml")
 	if err != nil {
 		t.Fatalf("loadInjectorBlocks failed: %v", err)
 	}

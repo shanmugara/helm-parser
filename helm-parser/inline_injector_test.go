@@ -49,7 +49,7 @@ func TestProcessTemplates(t *testing.T) {
 		t.Fatalf("Failed to load values.yaml: %v", err)
 	}
 
-	err = ProcessTemplates(chartDir, values, "inject-blocks.yaml", false, false, "")
+	err = ProcessTemplates(chartDir, values, "inject-blocks.yaml", false, false)
 	if err != nil {
 		t.Fatalf("ProcessTemplates failed: %v", err)
 	}
@@ -106,7 +106,7 @@ spec:
           - name: TEST_VAR
             value: test`
 
-	result, err := injectInlineContainerSpec(input, "inject-blocks.yaml", "")
+	result, err := injectInlineContainerSpec(input, "inject-blocks.yaml")
 	if err != nil {
 		t.Fatalf("injectInlineContainerSpec failed: %v", err)
 	}
@@ -153,7 +153,7 @@ spec:
           - name: TEST_VAR
             value: test`
 
-	result, err := injectInlineContainerSpec(input, "inject-blocks.yaml", "")
+	result, err := injectInlineContainerSpec(input, "inject-blocks.yaml")
 	if err != nil {
 		t.Fatalf("injectInlineContainerSpec failed: %v", err)
 	}
@@ -196,7 +196,7 @@ spec:
           - name: TEST_VAR
             value: test`
 
-	result, err := injectInlineContainerSpec(input, "inject-blocks.yaml", "")
+	result, err := injectInlineContainerSpec(input, "inject-blocks.yaml")
 	if err != nil {
 		t.Fatalf("injectInlineContainerSpec failed: %v", err)
 	}
@@ -213,7 +213,7 @@ spec:
 	}
 
 	// Run it again - should still be idempotent
-	result2, err := injectInlineContainerSpec(result, "inject-blocks.yaml", "")
+	result2, err := injectInlineContainerSpec(result, "inject-blocks.yaml")
 	if err != nil {
 		t.Fatalf("Second injectInlineContainerSpec failed: %v", err)
 	}

@@ -78,14 +78,13 @@ func parseValuePath(pathStr string) ValueReference {
 func detectWrapperPattern(content string) int {
 	lines := strings.Split(content, "\n")
 
+	var FoundWrapper bool = false
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-
 		// Skip empty lines and comments
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-
 		// Check if first non-comment key is a wrapper pattern
 		if strings.Contains(trimmed, ":") {
 			indent := GetIndentation(line)
@@ -95,11 +94,19 @@ func detectWrapperPattern(content string) int {
 				for _, wrapperKey := range KnownWrapperKeys {
 					if key == wrapperKey {
 						// Return the expected indent of children (typically 2)
-						return 2
+						FoundWrapper = true
+						continue
+						// return 2
 					}
 				}
+			} else if FoundWrapper {
+				// If we found the wrapper key, this is the next line that marks the root,
+				// return its indent
+				return GetIndentation(line)
+			} else {
+				// No wrapper pattern found at root level, exit
+				break
 			}
-			break
 		}
 	}
 

@@ -298,7 +298,7 @@ func splitDocuments(manifest string) []string {
 	return docs
 }
 
-func ProcessChart(chartPath string, localRepo string, customYaml string, criticalDs bool, controlPlane bool, systemCritical string, dryRun bool, verbose bool) error {
+func ProcessChart(chartPath string, localRepo string, customYaml string, criticalDs bool, controlPlane bool, dryRun bool, verbose bool) error {
 	// Verify if the customYaml file exists
 	if _, err := os.Stat(customYaml); os.IsNotExist(err) {
 		Logger.Errorf("Custom YAML file %s does not exist: %v", customYaml, err)
@@ -323,6 +323,7 @@ func ProcessChart(chartPath string, localRepo string, customYaml string, critica
 		Logger.Fatalf("failed to update registry name: %v", err)
 		return err
 	}
+	
 	// After updating values.yaml, render the chart locally with updated values
 	rel, err := renderChartFromValues(chartPath)
 	if err != nil {
@@ -366,10 +367,28 @@ func ProcessChart(chartPath string, localRepo string, customYaml string, critica
 	}
 	// Next we process the chart teamplates to inject other inline injector blocks
 	// Process templates to inject inline injector container spec
-	err = ProcessTemplates(chartPath, values, customYaml, criticalDs, controlPlane, systemCritical)
+	err = ProcessTemplates(chartPath, values, customYaml, criticalDs, controlPlane)
 	if err != nil {
 		Logger.Errorf("failed to process templates: %v", err)
 		return err
+	}
+
+	// Apply custom vlaues blocks in values.yaml
+	err = ApplyCustomValuesMods(chartPath, customYaml)
+	if err != nil {
+		Logger.Warnf("Failed to apply custom values modifications: %v", err)
+	}
+
+	// Apply custom template file modifications (e.g., template-specific injections and custom value blocks)
+	err = ApplyCustomTemplateMods(chartPath, customYaml)
+	if err != nil {
+		Logger.Warnf("Failed to apply custom template modifications: %v", err)
+	}
+
+	// // Aupdate custom schema modifications if any
+	err = ApplyCustomSchemaMods(chartPath, customYaml)
+	if err != nil {
+		Logger.Warnf("Failed to apply custom schema modifications: %v", err)
 	}
 
 	// Validate by rendering the chart again after injection
