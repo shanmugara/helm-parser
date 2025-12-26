@@ -1,0 +1,139 @@
+---
+# allPods: These settings are applied to all pods in all charts
+# priorityClassName: Set the priority class name for all pods (set this according the chart)
+allPods:
+- priorityClassName: system-cluster-critical
+- tolerations:
+  - key: addons.kaas.bloomberg.com/unavailable
+    operator: "Exists"
+    effect: NoSchedule
+- affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: kubernetes.io/role
+                operator: NotIn
+                values:
+                  - monitor
+
+
+#  allContainers: These settings are applied to all containers in all charts
+allContainers:
+- envFrom:
+  - configMapRef:
+      # Allow KUBERNETES_SERVICE_HOST and KUBERNETES_SERVICE_PORT to be overridden
+      name: kubernetes-services-endpoint
+      optional: true
+
+# criticalDsPods: Tolerations applied to all critical DaemonSet pods in all charts
+criticalDsPods:
+- tolerations:
+  - operator: "Exists"
+    effect: NoSchedule
+
+# controlPlanePods: Tolerations and affinity applied to all control plane pods in all charts
+controlPlanePods:
+- tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: "Exists"
+    effect: NoSchedule
+- affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: "\"Exists\""
+
+# service spec injections to values.yaml file
+serviceSpec:
+- type: NodePort
+
+# custom new values to inject into values.yaml file. if the value already exists, it will not be overwritten
+newValues:
+- somekey:
+    someNestedKey:
+    - service:
+        ports:
+        - name: http2
+          port: 80
+          targetPort: 8080
+        - name: https
+          port: 443
+          targetPort: 8443
+
+- hostPort:
+    enabled: false
+    ports:
+      http2: 80
+      https: 443
+
+# This section defines custom file modifications for specific templates,
+# These blocks of template code will be injected into specified locations in the target files.
+# we use text anchors to identify where to insert the blocks. The anchors are sequences of lines
+# that uniquely identify the insertion point and must appear in the target file in the specified order.
+customFileMods:
+# Target file is istio-gateway/templates/deployment.yaml
+- file: templates/deployment.yaml
+  modifications:
+    - name: "Add hostPort support"
+      anchorLines:
+        - "- containerPort: 15090"
+        - "protocol: TCP"
+        - "name: http-envoy-prom"
+      position: after  # insert after matching this sequence
+      block: |
+        {{- range .Values.service.ports }}
+        - name: {{ .name }}
+          containerPort: {{ .targetPort }}
+          protocol: TCP
+          {{- if $.Values.hostPort.enabled }}
+          hostPort: {{ index $.Values.hostPort.ports .name | default .targetPort }}
+          {{- end }}
+        {{- end }}
+
+# Custom schema modifications to values.schema.json
+customSchemaMods:
+- file: values.schema.json
+  modifications:
+    - name: "Additional properties true"
+      root:
+        "$defs":
+          "values"
+      block: |
+        "additionalProperties": true
+    - name: "Add hostPort schema"
+      root:
+        "$defs":
+          "values":
+            "properties"
+      block: |
+        "hostPort": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "ports": {
+              "type": "object"
+            }
+          }
+        }
+        
+      
+
+# systemCriticalPods: Settings applied to all system critical pods in all charts (not used)
+# systemClusterCriticalPods: Settings applied to all system cluster critical pods in all charts (not used)
+# systemDefaultPods: Settings applied to all system default pods in all charts (not used)
+# These are overridden by allPods - priorityClassName above
+# Left here for reference if we decide to use cmd args to set priorityClassName instead
+# systemCriticalNodePods:
+# - priorityClassName: system-node-critical
+
+# systemCriticalClusterPods:
+# - priorityClassName: system-cluster-critical
+
+# systemCriticalDefaultPods:
+# - priorityClassName: ""
