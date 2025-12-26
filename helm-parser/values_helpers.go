@@ -68,6 +68,15 @@ func mergeTolerations(lines []string, result []string, i, actualIndent int, bloc
 			continue
 		}
 
+		// Check for new list item at same indent level 12-25-2025
+		if nextIndent == actualIndent && strings.HasPrefix(nextTrimmed, "-") {
+			// This is a new list item at the same indent level, continue collecting
+			result = append(result, nextLine)
+			existingContent = append(existingContent, nextLine)
+			j++
+			continue
+		}
+
 		if nextIndent <= actualIndent {
 			break
 		}
@@ -97,25 +106,25 @@ func mergeTolerations(lines []string, result []string, i, actualIndent int, bloc
 			}
 		}
 	}
-	Logger.Infof("DEBUG mergeTolerations: Found %d existing tolerations", len(existingParsed))
+	Logger.Debugf("DEBUG mergeTolerations: Found %d existing tolerations", len(existingParsed))
 	for idx, tol := range existingParsed {
-		Logger.Infof("  Existing[%d]: %+v", idx, tol)
+		Logger.Debugf("DEBUG: Existing[%d]: %+v", idx, tol)
 	}
 
 	// Parse blocks to inject and collect only non-duplicate tolerations
 	newTolerationsToAdd := []map[interface{}]interface{}{}
 
-	Logger.Infof("DEBUG mergeTolerations: Checking %d blocks to inject", len(blocks))
+	Logger.Debugf("DEBUG mergeTolerations: Checking %d blocks to inject", len(blocks))
 	for blockIdx, block := range blocks {
-		Logger.Infof("DEBUG Block[%d]:\n%s", blockIdx, block)
+		Logger.Debugf("DEBUG Block[%d]:\n%s", blockIdx, block)
 		var blockData map[string]interface{}
 		if err := yaml.Unmarshal([]byte(block), &blockData); err != nil {
-			Logger.Infof("DEBUG Block[%d]: Failed to parse: %v", blockIdx, err)
+			Logger.Debugf("DEBUG Block[%d]: Failed to parse: %v", blockIdx, err)
 			continue // Skip unparseable blocks
 		}
 
 		if tolList, ok := blockData["tolerations"].([]interface{}); ok {
-			Logger.Infof("DEBUG Block[%d]: Found %d tolerations", blockIdx, len(tolList))
+			Logger.Debugf("DEBUG Block[%d]: Found %d tolerations", blockIdx, len(tolList))
 			for tolIdx, tol := range tolList {
 				if tolMap, ok := tol.(map[interface{}]interface{}); ok {
 					// Convert to string keys for comparison
@@ -126,13 +135,13 @@ func mergeTolerations(lines []string, result []string, i, actualIndent int, bloc
 						}
 					}
 
-					Logger.Infof("DEBUG Block[%d] Tol[%d]: %+v", blockIdx, tolIdx, newTol)
+					Logger.Debugf("DEBUG: mergeToTolerations Block[%d] Tol[%d]: %+v", blockIdx, tolIdx, newTol)
 
 					// Check if this toleration already exists
 					exists := false
 					for existIdx, existing := range existingParsed {
 						if tolerationsMatch(existing, newTol) {
-							Logger.Infof("DEBUG Block[%d] Tol[%d]: MATCHES Existing[%d]", blockIdx, tolIdx, existIdx)
+							Logger.Debugf("DEBUG Block[%d] Tol[%d]: MATCHES Existing[%d]", blockIdx, tolIdx, existIdx)
 							exists = true
 							break
 						}
@@ -140,7 +149,7 @@ func mergeTolerations(lines []string, result []string, i, actualIndent int, bloc
 
 					// Only add if it doesn't exist
 					if !exists {
-						Logger.Infof("DEBUG Block[%d] Tol[%d]: NEW - adding to inject list", blockIdx, tolIdx)
+						Logger.Debugf("DEBUG Block[%d] Tol[%d]: NEW - adding to inject list", blockIdx, tolIdx)
 						newTolerationsToAdd = append(newTolerationsToAdd, tolMap)
 					}
 				}
@@ -148,7 +157,7 @@ func mergeTolerations(lines []string, result []string, i, actualIndent int, bloc
 		}
 	}
 
-	Logger.Infof("DEBUG mergeTolerations: Will inject %d new tolerations", len(newTolerationsToAdd))
+	Logger.Infof("mergeTolerations: Will inject %d new tolerations", len(newTolerationsToAdd))
 
 	// If we have new tolerations to add, construct a single block and inject it
 	if len(newTolerationsToAdd) > 0 {
@@ -160,7 +169,9 @@ func mergeTolerations(lines []string, result []string, i, actualIndent int, bloc
 		blockStr := string(blockYaml)
 
 		// Inject using standard method
-		injected := injectBlockLines([]string{blockStr}, actualIndent+2, "tolerations")
+		//injected := injectBlockLines([]string{blockStr}, actualIndent+2, "tolerations")
+		// remove +2 to align with existing list items 12-25-2025
+		injected := injectBlockLines([]string{blockStr}, actualIndent, "tolerations")
 		result = append(result, injected...)
 		modified = true
 	}
@@ -335,7 +346,6 @@ func isListBasedBlock(key string, injectedBlocks []string) bool {
 // injectBlockLines converts block YAML strings to lines with proper indentation
 func injectBlockLines(blocks []string, indent int, key string) []string {
 	var result []string
-
 	for _, block := range blocks {
 		blockLines := strings.Split(strings.TrimSpace(block), "\n")
 
@@ -364,8 +374,9 @@ func injectBlockLines(blocks []string, indent int, key string) []string {
 		}
 	}
 	//DEBUG
-	//Logger.Infof("Injected lines for key=%s:\n%s", key, strings.Join(result, "\n"))
+	Logger.Debugf("DEBUG: injectBlockLines Injected lines for \nkey=%s\n%s", key, strings.Join(result, "\n"))
 	return result
+
 }
 
 // isSingleLineScalar checks if all blocks for a key are single-line scalar values
@@ -414,4 +425,23 @@ func renderChartFromValues(chartPath string) (*release.Release, error) {
 		return nil, err
 	}
 	return rel, nil
+}
+
+func readValuesFile(chartPath string) ([]byte, error) {
+	valuesPath := filepath.Join(chartPath, "values.yaml")
+	// Read the values file
+	content, err := os.ReadFile(valuesPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read values.yaml: %v", err)
+	}
+	return content, nil
+}
+
+func writeValuesFile(chartPath string, content []byte) error {
+	valuesPath := filepath.Join(chartPath, "values.yaml")
+	// Write back the modified values file
+	if err := os.WriteFile(valuesPath, content, 0644); err != nil {
+		return fmt.Errorf("failed to write updated values.yaml: %v", err)
+	}
+	return nil
 }

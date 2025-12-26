@@ -7,7 +7,7 @@ allPods:
 - priorityClassName: system-cluster-critical
 - tolerations:
   - key: addons.kaas.bloomberg.com/unavailable
-    operator: "\"Exists\""
+    operator: "Exists"
     effect: NoSchedule
 - affinity:
     nodeAffinity:
@@ -31,14 +31,14 @@ allContainers:
 # criticalDsPods: Tolerations applied to all critical DaemonSet pods in all charts
 criticalDsPods:
 - tolerations:
-  - operator: "\"Exists\""
+  - operator: "Exists"
     effect: NoSchedule
 
 # controlPlanePods: Tolerations and affinity applied to all control plane pods in all charts
 controlPlanePods:
 - tolerations:
   - key: node-role.kubernetes.io/control-plane
-    operator: "\"Exists\""
+    operator: "Exists"
     effect: NoSchedule
 - affinity:
     nodeAffinity:
@@ -47,7 +47,7 @@ controlPlanePods:
           preference:
             matchExpressions:
               - key: node-role.kubernetes.io/control-plane
-                operator: "\"Exists\""
+                operator: "Exists"
 
 # service spec injections to values.yaml file
 # serviceSpec:
@@ -56,8 +56,9 @@ controlPlanePods:
 # custom new values to inject into values.yaml file. if the value already exists, it will not be overwritten
 newValues:
 - app:
-   securityContext:
-     runAsUser: 1001
+    security:
+      securityContext:
+        runAsUser: 1001
 
 - bssoIDXProxy:
     enabled: false

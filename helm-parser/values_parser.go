@@ -104,7 +104,7 @@ func detectWrapperPattern(content string) int {
 				// return its indent
 				return GetIndentation(line)
 			} else {
-				// No wrapper pattern found at root level, exit
+				// No wrapper pattern found at root level, break
 				break
 			}
 		}

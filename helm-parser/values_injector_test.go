@@ -581,3 +581,35 @@ other:
 		t.Logf("%3d: %s", i+1, line)
 	}
 }
+
+func Test_injectBlockIntoValuesPath(t *testing.T) {
+	type args struct {
+		content      string
+		ref          ValueReference
+		blocks       []string
+		indentOffset int
+	}
+	tests := []struct {
+		name  string
+		args  args
+		want  string
+		want1 bool
+		want2 bool
+	}{
+		// TODO: Add test cases.
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, got1, got2 := injectBlockIntoValuesPath(tt.args.content, tt.args.ref, tt.args.blocks, tt.args.indentOffset)
+			if got != tt.want {
+				t.Errorf("injectBlockIntoValuesPath() got = %v, want %v", got, tt.want)
+			}
+			if got1 != tt.want1 {
+				t.Errorf("injectBlockIntoValuesPath() got1 = %v, want %v", got1, tt.want1)
+			}
+			if got2 != tt.want2 {
+				t.Errorf("injectBlockIntoValuesPath() got2 = %v, want %v", got2, tt.want2)
+			}
+		})
+	}
+}

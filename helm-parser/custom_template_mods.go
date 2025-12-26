@@ -238,51 +238,6 @@ func blockAlreadyExistsAtPosition(fileLines []string, blockLines []string, inser
 	return true
 }
 
-// blockAlreadyExists checks if a block already exists anywhere in the file (legacy)
-// It searches for the block content near the anchor location to avoid false positives
-func blockAlreadyExists(fileLines []string, blockLines []string) bool {
-	if len(blockLines) == 0 {
-		return false
-	}
-
-	// Create a normalized version of the block for comparison
-	normalizedBlock := make([]string, 0, len(blockLines))
-	for _, line := range blockLines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed != "" {
-			normalizedBlock = append(normalizedBlock, trimmed)
-		}
-	}
-
-	if len(normalizedBlock) == 0 {
-		return false
-	}
-
-	// For single-line blocks, check if an exact sequence exists
-	if len(normalizedBlock) == 1 {
-		// Single line blocks like "{{- end }}" are too generic
-		// Only skip if we find it in the exact context (not implemented yet)
-		// For now, allow single-line injections to proceed
-		return false
-	}
-
-	// For multi-line blocks, look for the sequence of lines
-	for i := 0; i <= len(fileLines)-len(normalizedBlock); i++ {
-		match := true
-		for j, blockLine := range normalizedBlock {
-			if strings.TrimSpace(fileLines[i+j]) != blockLine {
-				match = false
-				break
-			}
-		}
-		if match {
-			return true
-		}
-	}
-
-	return false
-}
-
 // prepareBlockForInsertion prepares a block for insertion with proper indentation
 func prepareBlockForInsertion(block string, baseIndent int) []string {
 	blockLines := strings.Split(strings.TrimSpace(block), "\n")

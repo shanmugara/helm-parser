@@ -2,8 +2,6 @@ package helm_parser
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -28,14 +26,12 @@ func InjectIntoValuesFile(chartDir string, blocks InjectorBlocks, referencedPath
 		blockKeys = append(blockKeys, k)
 	}
 	// Logger.Infof("DEBUG InjectIntoValuesFile: called with %d referencedPaths, blocks keys: %v", len(referencedPaths), blockKeys)
-	if len(referencedPaths) == 0 && len(blocks["newValues"]) == 0 {
+	if len(referencedPaths) == 0 {
 		// Logger.Infof("DEBUG InjectIntoValuesFile: No work to do, returning")
 		return nil
 	}
-
-	valuesPath := filepath.Join(chartDir, "values.yaml")
-	// Read the values file. This should include previous changes we made in registry updates.
-	valuesContent, err := os.ReadFile(valuesPath)
+	// Read existing values.yaml
+	valuesContent, err := readValuesFile(chartDir)
 	if err != nil {
 		return fmt.Errorf("failed to read values.yaml: %v", err)
 	}
@@ -49,22 +45,19 @@ func InjectIntoValuesFile(chartDir string, blocks InjectorBlocks, referencedPath
 	// Process each referenced path
 	for _, ref := range referencedPaths {
 		var injectedBlocks []string
-
 		// Determine which blocks to inject based on the key
 		// First check if it's a pod-level key
 		if slices.Contains(podConfigKeys, ref.Key) {
 			// Pod-level blocks
 			// We need to add new keys as we go, so handle each key specifically
+			// these keys are based on our current customizations as documented in kubception-docs
 			switch ref.Key {
 			case "tolerations", "affinity", "annotations":
 				injectedBlocks = collectPodBlocks(blocks, ref.Key, criticalDs, controlPlane)
 			case "nodeSelector":
-				injectedBlocks = getPodBlocksByKey(blocks["allPods"], "nodeSelector")
-
+				injectedBlocks = getPodBlocksByKey(blocks["allPods"], ref.Key)
 			case "priorityClassName":
-				//DEBUG
-				//Logger.Infof("injected blocks before priorityClass: %v", injectedBlocks)
-				injectedBlocks = getPodBlocksByKey(blocks["allPods"], "priorityClassName")
+				injectedBlocks = getPodBlocksByKey(blocks["allPods"], ref.Key)
 			}
 		} else if slices.Contains(containerConfigKeys, ref.Key) {
 			// Container-level blocks - dynamically check all container blocks
@@ -98,23 +91,12 @@ func InjectIntoValuesFile(chartDir string, blocks InjectorBlocks, referencedPath
 
 	// Inject custom newValues from inject-blocks.yaml at the root level
 	// these are vlaues we need to add to customize the chart, not part of teh default chart vlaues
-	if len(blocks["newValues"]) > 0 {
-		Logger.Infof("DEBUG: About to inject %d newValues blocks", len(blocks["newValues"]))
-		for idx, block := range blocks["newValues"] {
-			Logger.Infof("DEBUG: newValues block %d:\n%s", idx, block)
-		}
-		newContent, changed := injectNewValuesIntoRoot(modifiedContent, blocks["newValues"], indentOffset)
-		if changed {
-			modifiedContent = newContent
-			modified = true
-			Logger.Infof("Injected newValues into root of values.yaml")
-		}
-	}
 
 	if modified {
-		if err := os.WriteFile(valuesPath, []byte(modifiedContent), 0644); err != nil {
+		if err := writeValuesFile(chartDir, []byte(modifiedContent)); err != nil {
 			return fmt.Errorf("failed to write updated values.yaml: %v", err)
 		}
+
 		Logger.Infof("Updated values.yaml with injected blocks")
 	}
 
@@ -137,7 +119,7 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]
 		yl := ParseLine(line)
-		actualIndent := yl.Indent
+		//actualIndent := yl.Indent
 
 		// Skip empty lines and comments - add to result and continue
 		if yl.IsEmpty || yl.IsComment {
@@ -147,14 +129,9 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 
 		// Check if this is the wrapper line itself - preserve it and skip processing
 		//DEBUG
-		//Logger.Infof("DEBUG injectBlockIntoValuesPath: Processing line %d: '%s' (indentOffset=%d, key=%s, hasColon=%v)", i, line, indentOffset, yl.Key, yl.HasColon)
-		//fmt.Println("Press Enter to continue...")
-		//_, err := fmt.Scanln()
-		//if err != nil {
-		//	return "", false, false
-		//}
+		Logger.Debugf("DEBUG injectBlockIntoValuesPath: Processing line %d: '%s' (indentOffset=%d, key=%s, hasColon=%v)", i, line, indentOffset, yl.Key, yl.HasColon)
 
-		if indentOffset > 0 && actualIndent == 0 && yl.HasColon {
+		if indentOffset > 0 && yl.Indent == 0 && yl.HasColon {
 			if slices.Contains(KnownWrapperKeys, yl.Key) {
 				result = append(result, line)
 				continue
@@ -162,9 +139,9 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 		}
 
 		// Apply virtual indent offset - treat wrapper content as if at higher root
-		indent := actualIndent
-		if indentOffset > 0 && actualIndent >= indentOffset {
-			indent = actualIndent - indentOffset
+		indent := yl.Indent
+		if indentOffset > 0 && yl.Indent >= indentOffset {
+			indent = yl.Indent - indentOffset
 		}
 
 		// Update path stack based on virtual indentation
@@ -180,16 +157,17 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 
 			// Check if we've reached the target path
 			if pathsMatch(currentPath, ref.Path) {
-				Logger.Infof("DEBUG: Matched target path %v for key=%s", ref.Path, yl.Key)
+				Logger.Debugf("DEBUG: Matched target path %v for key %s", ref.Path, yl.Key)
 				// Found it! Now inject
 				isEmpty := yl.Value == "" || yl.Value == "[]" || yl.Value == "{}"
 
 				if isEmpty {
 					// Empty inline value - but check if there's content on subsequent lines
 					// For complex nested structures (not list-based), check for existing content
+					isComplexNested := isComplexNestedBlock(yl.Key, blocks)
 
-					if slices.Contains(podConfigKeys, yl.Key) || isComplexNestedBlock(yl.Key, blocks) {
-						Logger.Infof("DEBUG: Checking for existing content for key=%s, isEmpty=%v", yl.Key, isEmpty)
+					if slices.Contains(podConfigKeys, yl.Key) || isComplexNested {
+						Logger.Debugf("DEBUG: Checking for existing content for complex key=%s since isEmpty:%v", yl.Key, isEmpty)
 						j := i + 1
 						hasExistingContent := false
 						for j < len(lines) {
@@ -197,31 +175,60 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 							nextIndent := getIndentation(nextLine)
 							nextTrimmed := strings.TrimSpace(nextLine)
 
+							//DEBUG
+							Logger.Debugf("DEBUG: Checking \nline j=%d\nnextLine:'%s' (nextIndent=%d, currentIndent=%d)\ncurrent line:%s", j, nextLine, nextIndent, yl.Indent, line)
+							// Pause for debugging
+							// if yl.Key == "tolerations" {
+							// 	fmt.Println("Debug Press Enter to continue...")
+							// 	fmt.Scanln()
+							// }
+
 							if nextTrimmed == "" || strings.HasPrefix(nextTrimmed, "#") {
+								// Skip empty lines and comments
 								j++
 								continue
 							}
 
-							if nextIndent <= actualIndent {
+							// add a logic to check if nextIndent == yl.Indent and if the nextLineTrimmed starts with '- '
+							// this indicates that the current key is a list and has existing content
+							if nextIndent == yl.Indent && strings.HasPrefix(nextTrimmed, "- ") {
+								hasExistingContent = true
+								Logger.Debugf("DEBUG: Found existing list content for key=%s at line j=%d: %s", yl.Key, j, nextTrimmed)
+								break
+							}
+
+							if nextIndent <= yl.Indent {
+								Logger.Debugf("DEBUG: Stopped checking nextIndent <= yl.Indent for \nkey=%s nextIndent=%d yl.Indent:%d", yl.Key, nextIndent, yl.Indent)
+								// fmt.Println("Press Enter to continue...")
+								// fmt.Scanln()
+								// Reached same or higher level - no content found
 								break
 							}
 
 							// Found content at higher indent - already has content
 							hasExistingContent = true
-							Logger.Infof("DEBUG: Found existing content for key=%s at line j=%d: %s", yl.Key, j, nextTrimmed)
+							Logger.Debugf("DEBUG: Found existing content for key=%s at line j=%d: %s", yl.Key, j, nextTrimmed)
 							break
 						}
-						Logger.Infof("DEBUG: hasExistingContent for key=%s: %v", yl.Key, hasExistingContent)
+						Logger.Debugf("DEBUG: Final value for hasExistingContent for key=%s: %v", yl.Key, hasExistingContent)
 
 						if hasExistingContent {
 							// Already has content - behavior depends on block type
-							Logger.Infof("DEBUG injectBlockIntoValuesPath: Key %s has existing content, checking handler", yl.Key)
-
+							Logger.Debugf("DEBUG injectBlockIntoValuesPath: Key %s has existing content, checking handler", yl.Key)
 							if yl.Key == "tolerations" {
-								Logger.Infof("DEBUG: Calling mergeTolerations for key=tolerations")
+								Logger.Debugf("DEBUG: Calling mergeTolerations for key=tolerations")
 								var modifiedTol, injectedTol bool
 								var j int
-								result, j, modifiedTol, injectedTol = mergeTolerations(lines, result, i, actualIndent, blocks, line)
+								//lines: values.yaml lines
+								//result: current result lines should contain only upto wrapper key if any
+								//i: current line index in values.yaml
+								//yl.Indent: indent of current line
+								//blocks: blocks to inject
+								//line: current line content
+								//fmt.Println("result before mergeTolerations:\n%+v", strings.Join(result, "\n"))
+								//fmt.Println("Press Enter to continue...")
+								//fmt.Scanln()
+								result, j, modifiedTol, injectedTol = mergeTolerations(lines, result, i, yl.Indent, blocks, line)
 								modified = modified || modifiedTol
 								actuallyInjected = actuallyInjected || injectedTol
 								i = j - 1
@@ -229,7 +236,7 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 							} else if yl.Key == "affinity" || isComplexNestedBlock(yl.Key, blocks) {
 								var modifiedComplex, injectedComplex bool
 								var j int
-								result, j, modifiedComplex, injectedComplex = handleComplexNestedBlock(lines, result, i, actualIndent, blocks, yl, true)
+								result, j, modifiedComplex, injectedComplex = handleComplexNestedBlock(lines, result, i, yl.Indent, blocks, yl, true)
 								modified = modified || modifiedComplex
 								actuallyInjected = actuallyInjected || injectedComplex
 								i = j - 1
@@ -240,8 +247,14 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 
 					// Empty value and no existing content - inject our blocks
 					// Use actualIndent for writing back to preserve file structure
-					result = append(result, strings.Repeat(" ", actualIndent)+yl.Key+":")
-					injected := injectBlockLines(blocks, actualIndent+2, yl.Key)
+					result = append(result, strings.Repeat(" ", yl.Indent)+yl.Key+":")
+					//injected := injectBlockLines(blocks, 2+yl.Indent, yl.Key) 12-25-2025 remove +2 indent
+					indentAdd := 2
+					// Special case: for tolerations, keep same indent as key for list items
+					if yl.Key == "tolerations" {
+						indentAdd = 0
+					}
+					injected := injectBlockLines(blocks, indentAdd+yl.Indent, yl.Key)
 					result = append(result, injected...)
 					modified = true
 					actuallyInjected = true
@@ -257,7 +270,7 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 					if !isComplexNestedBlock(yl.Key, blocks) && !isListBasedBlock(yl.Key, blocks) {
 						Logger.Infof("Found scalar value for key %s:%s, replacing with injected content", yl.Key, yl.Value)
 						// Simple scalar value - replace with injected content
-						injected := injectBlockLines(blocks, actualIndent, yl.Key)
+						injected := injectBlockLines(blocks, yl.Indent, yl.Key)
 						if len(injected) > 0 {
 							result = append(result, injected...)
 							modified = true
@@ -275,7 +288,7 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 					if yl.Key == "tolerations" {
 						var modifiedTol, injectedTol bool
 						var j int
-						result, j, modifiedTol, injectedTol = mergeTolerations(lines, result, i, actualIndent, blocks, line)
+						result, j, modifiedTol, injectedTol = mergeTolerations(lines, result, i, yl.Indent, blocks, line)
 						modified = modified || modifiedTol
 						actuallyInjected = actuallyInjected || injectedTol
 						i = j - 1
@@ -283,7 +296,7 @@ func injectBlockIntoValuesPath(content string, ref ValueReference, blocks []stri
 					} else if yl.Key == "affinity" || isComplexNestedBlock(yl.Key, blocks) {
 						var modifiedComplex, injectedComplex bool
 						var j int
-						result, j, modifiedComplex, injectedComplex = handleComplexNestedBlock(lines, result, i, actualIndent, blocks, yl, false)
+						result, j, modifiedComplex, injectedComplex = handleComplexNestedBlock(lines, result, i, yl.Indent, blocks, yl, false)
 						modified = modified || modifiedComplex
 						actuallyInjected = actuallyInjected || injectedComplex
 						i = j - 1
@@ -382,6 +395,7 @@ func findRootKey(lines []string, targetKey string, indentOffset int) (bool, stri
 func findWrapperEndPosition(lines []string, indentOffset int) int {
 	lastContentLine := -1
 	foundWrapper := false
+	wrapperLine := -1
 
 	for i, line := range lines {
 		yl := ParseLine(line)
@@ -394,11 +408,13 @@ func findWrapperEndPosition(lines []string, indentOffset int) int {
 		// Check if this is the wrapper line itself
 		if yl.Indent == 0 && yl.HasColon && slices.Contains(KnownWrapperKeys, yl.Key) {
 			foundWrapper = true
+			wrapperLine = i
 			continue
 		}
 
 		// If we found the wrapper and this line is indented at or below wrapper level (0),
 		// and it's not the wrapper itself, we've gone past the wrapper content
+		// this should not happen as usually there is only one root-level wrapper - safety net
 		if foundWrapper && yl.Indent == 0 {
 			break
 		}
@@ -410,6 +426,7 @@ func findWrapperEndPosition(lines []string, indentOffset int) int {
 				lastContentLine = i
 			} else if yl.Indent == 0 {
 				// Hit a root-level key that's not the wrapper, stop here
+				// again this should not happen - safety net
 				break
 			}
 		}
@@ -423,12 +440,7 @@ func findWrapperEndPosition(lines []string, indentOffset int) int {
 
 	// If no content found but wrapper exists, find the wrapper line and insert after it
 	if foundWrapper {
-		for i, line := range lines {
-			yl := ParseLine(line)
-			if yl.Indent == 0 && yl.HasColon && slices.Contains(KnownWrapperKeys, yl.Key) {
-				return i + 1
-			}
-		}
+		return wrapperLine
 	}
 
 	// Default to end of file
@@ -468,14 +480,6 @@ func deepMergeYAML(existingMap, newMap map[interface{}]interface{}) map[interfac
 	}
 
 	return result
-}
-
-// min returns the minimum of two integers
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // toInterfaceMap converts various map types to map[interface{}]interface{}

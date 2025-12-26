@@ -2,18 +2,20 @@ package helm_parser
 
 import (
 	"strings"
+	"unicode"
 )
 
 // YAMLLine represents a parsed line in a YAML file
 type YAMLLine struct {
-	Raw       string // Original line
-	Trimmed   string // Trimmed content
-	Indent    int    // Indentation level (spaces)
-	IsEmpty   bool   // Is empty or whitespace only
-	IsComment bool   // Is a comment line
-	Key       string // Key if this is a key:value line
-	Value     string // Value if this is a key:value line
-	HasColon  bool   // Whether line contains ":"
+	Raw         string // Original line
+	Trimmed     string // Trimmed content
+	Indent      int    // Indentation level (spaces)
+	IsEmpty     bool   // Is empty or whitespace only
+	IsComment   bool   // Is a comment line
+	Key         string // Key if this is a key:value line
+	Value       string // Value if this is a key:value line
+	HasColon    bool   // Whether line contains ":"
+	ValueIndent int    // Number of spaces before value (for alignment)
 }
 
 // ParseLine parses a YAML line into a YAMLLine struct
@@ -36,6 +38,7 @@ func ParseLine(line string) YAMLLine {
 		if len(parts) == 2 {
 			yl.Key = strings.TrimSpace(parts[0])
 			yl.Value = strings.TrimSpace(parts[1])
+			yl.ValueIndent = len(parts[1]) - len(strings.TrimLeftFunc(parts[1], unicode.IsSpace))
 		}
 	}
 

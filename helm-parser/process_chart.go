@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"path"
 	"path/filepath"
@@ -34,25 +33,26 @@ var (
 
 func LoadValues(chartPath string) (map[interface{}]interface{}, error) {
 	if _, err := os.Stat(chartPath); os.IsNotExist(err) {
-		log.Printf("Chart path %s does not exist", chartPath)
+		Logger.Errorf("Chart path %s does not exist", chartPath)
 		return nil, err
 	}
 	if _, err := os.Stat(filepath.Join(chartPath, "values.yaml")); os.IsNotExist(err) {
-		log.Printf("values.yaml does not exist in chart path %s", chartPath)
+		Logger.Errorf("values.yaml does not exist in chart path %s", chartPath)
 		return nil, err
 	}
 	// Load values.yaml
-	valuesFilePath := filepath.Join(chartPath, "values.yaml")
-	valuesFile, err := os.ReadFile(valuesFilePath)
+	//valuesFilePath := filepath.Join(chartPath, "values.yaml")
+	//valuesFile, err := os.ReadFile(valuesFilePath)
+	valuesContent, err := readValuesFile(chartPath)
 	if err != nil {
-		log.Printf("Error reading values.yaml: %v", err)
+		Logger.Errorf("Error reading values.yaml: %v", err)
 		return nil, err
 	}
 	//Load as a yaml map
 	valuesMap := make(map[interface{}]interface{})
-	err = yaml.Unmarshal(valuesFile, &valuesMap)
+	err = yaml.Unmarshal(valuesContent, &valuesMap)
 	if err != nil {
-		log.Printf("Error unmarshalling values.yaml: %v", err)
+		Logger.Errorf("LoadValues: Error unmarshalling values.yaml: %v", err)
 		return nil, err
 	}
 
@@ -74,7 +74,7 @@ func checkRegistryAttr(key interface{}) bool {
 func renderChartLocal(chartPath string, values map[string]interface{}) (*release.Release, error) {
 	chart, err := loader.Load(chartPath)
 	if err != nil {
-		Logger.Errorf("chart loader.Load failed: %v", err)
+		Logger.Errorf("renderChartLocal: chart loader.Load failed: %v", err)
 		return nil, err
 	}
 
@@ -143,10 +143,8 @@ func convertMapI2MapS(i interface{}) interface{} {
 // UpdateRegistryInValuesFile updates registry paths (hub, registry, repository) in values.yaml
 // while preserving comments, order, and formatting using text-based manipulation
 func UpdateRegistryInValuesFile(chartPath string, newRepo string) error {
-	valuesPath := filepath.Join(chartPath, "values.yaml")
-
-	// Read the values file
-	content, err := os.ReadFile(valuesPath)
+	// Read the values.yaml
+	content, err := readValuesFile(chartPath)
 	if err != nil {
 		return fmt.Errorf("failed to read values.yaml: %v", err)
 	}
@@ -164,11 +162,12 @@ func UpdateRegistryInValuesFile(chartPath string, newRepo string) error {
 	modifiedContent, modified := replaceRegistryInText(string(content), newRegDomain, newRegPath)
 
 	// Write back to values.yaml file
-	if err := os.WriteFile(valuesPath, []byte(modifiedContent), 0644); err != nil {
+	if err := writeValuesFile(chartPath, []byte(modifiedContent)); err != nil {
 		return fmt.Errorf("failed to write updated values.yaml: %v", err)
 	}
+
 	if modified {
-		Logger.Infof("Updated registry paths in %s", valuesPath)
+		Logger.Infof("Updated registry paths in %s", path.Join(chartPath, "values.yaml"))
 	}
 	return nil
 }
@@ -255,7 +254,7 @@ func replaceRegistryInText(content string, newRegDomain string, newRegPath strin
 		result = append(result, line)
 	}
 	if !regpathKey {
-		Logger.Infof("No registry attribute keys found to update in values.yaml")
+		Logger.Warnf("No registry attribute keys found to update in values.yaml")
 	}
 
 	return strings.Join(result, "\n"), regpathKey
@@ -299,6 +298,11 @@ func splitDocuments(manifest string) []string {
 }
 
 func ProcessChart(chartPath string, localRepo string, customYaml string, criticalDs bool, controlPlane bool, dryRun bool, verbose bool) error {
+	// Set logging level
+	Logger.SetLevel(logrus.InfoLevel)
+	if verbose {
+		Logger.SetLevel(logrus.DebugLevel)
+	}
 	// Verify if the customYaml file exists
 	if _, err := os.Stat(customYaml); os.IsNotExist(err) {
 		Logger.Errorf("Custom YAML file %s does not exist: %v", customYaml, err)
@@ -314,16 +318,16 @@ func ProcessChart(chartPath string, localRepo string, customYaml string, critica
 	// First load values.yaml from chart
 	values, err := LoadValues(chartPath)
 	if err != nil {
-		Logger.Fatalf("failed to load values: %v", err)
+		Logger.Errorf("failed to load values: %v", err)
 		return err
 	}
 	// Next update the registry names in values to our localRepo and render the chart
 	err = UpdateRegistryInValuesFile(chartPath, localRepo)
 	if err != nil {
-		Logger.Fatalf("failed to update registry name: %v", err)
+		Logger.Errorf("failed to update registry name: %v", err)
 		return err
 	}
-	
+
 	// After updating values.yaml, render the chart locally with updated values
 	rel, err := renderChartFromValues(chartPath)
 	if err != nil {
@@ -351,19 +355,19 @@ func ProcessChart(chartPath string, localRepo string, customYaml string, critica
 	for _, img := range images {
 		if exists, ok := imageExistMap[img]; ok {
 			if !exists {
-				Logger.Errorf("Image does not exist in registry: %s", img)
+				Logger.Errorf("Image not found in registry: %s", img)
 				failFatal = true
 			} else {
 				// DEBUG
-				Logger.Infof("Image exists in registry: %s", img)
+				Logger.Infof("Image found in registry: %s", img)
 			}
 		}
 	}
 	if failFatal {
 		if !dryRun {
-			return fmt.Errorf("one or more images do not exist in registry")
+			return fmt.Errorf("one or more images not found in registry")
 		}
-		Logger.Errorf("one or more images do not exist in registry")
+		Logger.Warnf("one or more images not found in registry - ignoring due to dry-run mode")
 	}
 	// Next we process the chart teamplates to inject other inline injector blocks
 	// Process templates to inject inline injector container spec
@@ -385,7 +389,7 @@ func ProcessChart(chartPath string, localRepo string, customYaml string, critica
 		Logger.Warnf("Failed to apply custom template modifications: %v", err)
 	}
 
-	// // Aupdate custom schema modifications if any
+	// Aupdate custom schema modifications if any
 	err = ApplyCustomSchemaMods(chartPath, customYaml)
 	if err != nil {
 		Logger.Warnf("Failed to apply custom schema modifications: %v", err)
@@ -399,8 +403,12 @@ func ProcessChart(chartPath string, localRepo string, customYaml string, critica
 		return err
 	}
 
+	Logger.Infoln("Injection complete: chart modifications applied successfully.")
+
 	if verbose {
+		Logger.Infof("%s", strings.Repeat("=", 80))
 		Logger.Infof("Rendered manifest after injection:\n%s", relUpdated.Manifest)
+		Logger.Infof("%s", strings.Repeat("=", 80))
 	}
 
 	return nil
@@ -410,15 +418,11 @@ func backupValuesFile(chartPath string) error {
 	valuesPath := filepath.Join(chartPath, "values.yaml")
 	backupPath := valuesPath + ".backup"
 
-	if _, err := os.Stat(valuesPath); os.IsNotExist(err) {
-		return fmt.Errorf("values.yaml does not exist at %s", valuesPath)
-	}
-
 	if _, err := os.Stat(backupPath); err == nil {
 		return nil
 	}
 
-	input, err := os.ReadFile(valuesPath)
+	input, err := readValuesFile(chartPath)
 	if err != nil {
 		return fmt.Errorf("failed to read values.yaml for backup: %w", err)
 	}

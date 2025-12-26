@@ -2,8 +2,6 @@ package helm_parser
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -28,12 +26,10 @@ func ApplyCustomValuesMods(chartDir string, customYaml string) error {
 	return nil
 }
 
-// InjectNewValuesOnly injects only the newValues blocks into values.yaml
+// this injects only the newValues blocks into values.yaml
 func InjectNewValuesOnly(chartDir string, newValueBlocks []string) error {
-	valuesPath := filepath.Join(chartDir, "values.yaml")
-
-	// Read the values file
-	content, err := os.ReadFile(valuesPath)
+	// Read existing values.yaml
+	content, err := readValuesFile(chartDir)
 	if err != nil {
 		return fmt.Errorf("failed to read values.yaml: %v", err)
 	}
@@ -42,18 +38,19 @@ func InjectNewValuesOnly(chartDir string, newValueBlocks []string) error {
 	indentOffset := detectWrapperPattern(string(content))
 
 	// Inject newValues
-	Logger.Infof("DEBUG: About to inject %d newValues blocks (pre-render)", len(newValueBlocks))
-	//for idx, block := range blocks["newValues"] {
-	//	Logger.Infof("DEBUG: newValues block %d:\n%s", idx, block)
-	//}
+	Logger.Debugf("DEBUG: InjectNewValuesOnly About to inject %d newValues blocks (pre-render)", len(newValueBlocks))
+	Logger.Debugf("DEBUG: InjectNewVlauesOnly Injecting \n%+v newValues blocks", newValueBlocks)
+	//fmt.Println("Press Enter to continue...")
+	//fmt.Scanln()
+
 	// newValues are always injected at root level, so make sure to
 	// specify the newValues block correctly with proper indentation
 	newContent, changed := injectNewValuesIntoRoot(string(content), newValueBlocks, indentOffset)
 	if changed {
-		if err := os.WriteFile(valuesPath, []byte(newContent), 0644); err != nil {
+		if err := writeValuesFile(chartDir, []byte(newContent)); err != nil {
 			return fmt.Errorf("failed to write updated values.yaml: %v", err)
 		}
-		Logger.Infof("Injected newValues into root of values.yaml (pre-render)")
+		Logger.Infof("InjectNewValuesOnly Injected newValues into root of values.yaml (pre-render)")
 	}
 
 	return nil
@@ -80,8 +77,12 @@ func injectNewValuesIntoRoot(content string, newValuesBlocks []string, indentOff
 
 		// Each block should have exactly one key at the root level
 		for key, newValue := range blockData {
+			Logger.Debugf("DEBUG: injectNewValuesIntoRoot Injecting %d:\n%s: %v", blockIdx, key, newValue)
+			//fmt.Scanln()
 			// Check if the key already exists in the values file
 			keyExists, existingValue, startLine, endLine := findAndRemoveRootKey(lines, key, indentOffset)
+			Logger.Debugf("DEBUG: injectNewValuesIntoRoot key '%s' exists: %v (lines %d-%d)", key, keyExists, startLine, endLine)
+			//fmt.Scanln()
 
 			// define a variable to hold the final block content to inject
 			finalBlock := block
@@ -109,32 +110,32 @@ func injectNewValuesIntoRoot(content string, newValuesBlocks []string, indentOff
 				//   resources:
 				//     cpu: 100m
 				//     memory: 256Mi"
-				Logger.Infof("DEBUG: Existing content for key '%s' (lines %d-%d, %d total lines)", key, startLine, endLine, len(lines[startLine:endLine+1]))
+				Logger.Debugf("DEBUG: injectNewValuesIntoRoot Existing content for key '%s' (lines %d-%d, %d total lines)", key, startLine, endLine, len(lines[startLine:endLine+1]))
 				// Log first and last few lines to diagnose extraction issues
-				extractedLines := lines[startLine : endLine+1]
-				if len(extractedLines) > 10 {
-					Logger.Infof("DEBUG: First 5 lines:\n%s", strings.Join(extractedLines[:5], "\n"))
-					Logger.Infof("DEBUG: Last 5 lines:\n%s", strings.Join(extractedLines[len(extractedLines)-5:], "\n"))
-				} else {
-					Logger.Infof("DEBUG: Extracted content:\n%s", existingContent)
-				}
+				//extractedLines := lines[startLine : endLine+1]
+				//if len(extractedLines) > 10 {
+				//	Logger.Debugf("DEBUG: injectNewValuesIntoRoot First 5 lines:\n%s", strings.Join(extractedLines[:5], "\n"))
+				//	Logger.Debugf("DEBUG: injectNewValuesIntoRoot Last 5 lines:\n%s", strings.Join(extractedLines[len(extractedLines)-5:], "\n"))
+				//} else {
+				//	Logger.Infof("DEBUG: injectNewValuesIntoRoot Extracted content:\n%s", existingContent)
+				//}
 
 				// Parse the existing content
 				var existingData map[string]interface{}
 				if err := yaml.Unmarshal([]byte(existingContent), &existingData); err == nil {
-					Logger.Infof("DEBUG: Parsed existingData: %+v", existingData)
+					Logger.Debugf("DEBUG: Parsed existingData: %+v", existingData)
 					// Successfully parsed existing content as YAML
 					if existingVal, hasKey := existingData[key]; hasKey {
-						Logger.Infof("DEBUG: Found key '%s' in existingData, value type: %T", key, existingVal)
+						Logger.Debugf("DEBUG: Found key '%s' in existingData, value type: %T", key, existingVal)
 						// Check if both existing and new values are maps
 						if existingMap, ok := toInterfaceMap(existingVal); ok {
-							Logger.Infof("DEBUG: Existing value is a map with %d keys", len(existingMap))
+							Logger.Debugf("DEBUG: Existing value is a map with %d keys", len(existingMap))
 							if newMap, ok := toInterfaceMap(newValue); ok {
-								Logger.Infof("DEBUG: New value is a map with %d keys", len(newMap))
+								Logger.Debugf("DEBUG: New value is a map with %d keys", len(newMap))
 								// Deep merge: merge new values into existing map
 								mergedValue := deepMergeYAML(existingMap, newMap)
-								Logger.Infof("DEBUG: Merged value has %d keys", len(mergedValue))
-								Logger.Infof("Key '%s' already exists, performing deep merge", key)
+								Logger.Debugf("DEBUG: Merged value has %d keys", len(mergedValue))
+								Logger.Infof("injectNewValuesIntoRoot: key '%s' already exists, performing deep merge", key)
 
 								// Re-marshal the merged block
 								mergedBlock, err := yaml.Marshal(map[string]interface{}{key: mergedValue})
@@ -142,7 +143,7 @@ func injectNewValuesIntoRoot(content string, newValuesBlocks []string, indentOff
 									Logger.Errorf("Failed to marshal merged value for key '%s': %v", key, err)
 									continue
 								}
-								Logger.Infof("DEBUG: Merged block to inject:\n%s", string(mergedBlock))
+								Logger.Debugf("DEBUG: Merged block to inject:\n%s", string(mergedBlock))
 								finalBlock = string(mergedBlock)
 							} else {
 								Logger.Infof("Key '%s' exists but new value is not a map, replacing", key)
@@ -152,13 +153,13 @@ func injectNewValuesIntoRoot(content string, newValuesBlocks []string, indentOff
 						}
 					}
 				} else {
-					Logger.Errorf("DEBUG: Failed to unmarshal existing content for key '%s': %v", key, err)
-					Logger.Infof("Key '%s' exists with scalar value '%s', replacing", key, existingValue)
+					Logger.Errorf("injectNewValuesIntoRoot: key '%s' exists with scalar value '%s'", key, existingValue)
+					Logger.Fatalf("injectNewValuesIntoRoot: failed to unmarshal existing content for key '%s': %v", key, err)
 				}
 				// Remove the old key and its content
 				lines = append(lines[:startLine], lines[endLine+1:]...)
 			} else {
-				Logger.Infof("Key '%s' does not exist, adding new", key)
+				Logger.Infof("injectNewValuesIntoRoot: key '%s' does not exist, adding new", key)
 			}
 
 			// Inject the new block at the appropriate location
@@ -183,9 +184,13 @@ func injectNewValuesIntoRoot(content string, newValuesBlocks []string, indentOff
 			}
 
 			// Prepare the block lines to inject (use finalBlock which contains merged content)
+			Logger.Debugf("DEBUG: Finalblock: %+v", finalBlock)
+			//fmt.Scanln()
+			//fmt.Println("custom_values_mod.go: Preparing to inject finalBlock..")
+
 			blockLines := strings.Split(strings.TrimSpace(finalBlock), "\n")
-			Logger.Infof("DEBUG: Preparing to inject %d lines for key '%s'", len(blockLines), key)
-			Logger.Infof("DEBUG: First 5 lines of finalBlock:\n%s", strings.Join(blockLines[:min(5, len(blockLines))], "\n"))
+			Logger.Debugf("DEBUG: Preparing to inject %d lines for key '%s'", len(blockLines), key)
+			Logger.Debugf("DEBUG: First 5 lines of finalBlock:\n%s", strings.Join(blockLines[:min(5, len(blockLines))], "\n"))
 			var newLines []string
 
 			// Find the base indentation of the first line (usually 0 for root keys)
@@ -202,15 +207,14 @@ func injectNewValuesIntoRoot(content string, newValuesBlocks []string, indentOff
 				// Calculate the relative indentation from the base
 				lineIndent := getIndentation(blockLine)
 				relativeIndent := lineIndent - baseIndent
-
 				// Apply indentOffset + relative indentation
 				newLines = append(newLines, strings.Repeat(" ", indentOffset+relativeIndent)+trimmedLine)
 			}
 
 			// Insert the new lines at the appropriate position
-			Logger.Infof("DEBUG: Actually inserting %d new lines at position %d (total lines before: %d)", len(newLines), insertPos, len(lines))
+			Logger.Debugf("DEBUG: Actually inserting %d new lines at position %d (total lines before: %d)", len(newLines), insertPos, len(lines))
 			lines = append(lines[:insertPos], append(newLines, lines[insertPos:]...)...)
-			Logger.Infof("DEBUG: Total lines after insertion: %d", len(lines))
+			Logger.Debugf("DEBUG: Total lines after insertion: %d", len(lines))
 
 			modified = true
 			if keyExists {
