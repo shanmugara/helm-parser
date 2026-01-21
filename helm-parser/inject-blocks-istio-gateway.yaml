@@ -17,7 +17,6 @@ allPods:
                 values:
                   - monitor
 
-
 #  allContainers: These settings are applied to all containers in all charts
 allContainers:
 - envFrom:
@@ -63,7 +62,6 @@ newValues:
         - name: https
           port: 443
           targetPort: 8443
-
 - hostPort:
     enabled: false
     ports:
@@ -121,19 +119,3 @@ customSchemaMods:
             }
           }
         }
-        
-      
-
-# systemCriticalPods: Settings applied to all system critical pods in all charts (not used)
-# systemClusterCriticalPods: Settings applied to all system cluster critical pods in all charts (not used)
-# systemDefaultPods: Settings applied to all system default pods in all charts (not used)
-# These are overridden by allPods - priorityClassName above
-# Left here for reference if we decide to use cmd args to set priorityClassName instead
-# systemCriticalNodePods:
-# - priorityClassName: system-node-critical
-
-# systemCriticalClusterPods:
-# - priorityClassName: system-cluster-critical
-
-# systemCriticalDefaultPods:
-# - priorityClassName: ""
